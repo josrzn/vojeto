@@ -1,0 +1,30 @@
+{
+  "$comment": "Everything user-specific lives here. Change `home.query` to move house.",
+  "home": {
+    "query": "Roanne",
+    "stopId": null
+  },
+  "trip": {
+    "arriveBy": "09:00",
+    "arriveNoEarlierThan": "06:30",
+    "earliestDeparture": "05:00",
+    "maxTravelMinutes": 240,
+    "maxTransfers": 2,
+    "minTransferMinutes": 5
+  },
+  "bike": {
+    "profile": "trekking",
+    "kmPerDay": 90,
+    "maxTotalKm": 400,
+    "brouterUrl": "https://brouter.de/brouter"
+  },
+  "gtfs": {
+    "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
+    "$comment": "A route is kept when any of these matches agency_name / route_long_name / route_desc, case-insensitive. Run `npm run ingest -- --explain-routes` after the first download to check against the real feed.",
+    "keepRoutePatterns": ["\\bTER\\b"],
+    "dropRoutePatterns": ["TGV", "OUIGO", "INOUI", "LYRIA", "EUROSTAR", "THALYS", "TRENITALIA", "RENFE", "\\bCAR\\b", "AUTOCAR", "\\bBUS\\b"]
+  },
+  "map": {
+    "styleUrl": "https://tiles.openfreemap.org/styles/liberty"
+  }
+}

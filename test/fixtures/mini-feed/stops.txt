@@ -1,0 +1,21 @@
+stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station
+SA_ROANNE,Roanne,46.0389,4.0656,1,
+SP_ROANNE_A,Roanne,46.0389,4.0656,0,SA_ROANNE
+SP_ROANNE_B,Roanne,46.0389,4.0656,0,SA_ROANNE
+SA_TARARE,Tarare,45.8964,4.4336,1,
+SP_TARARE,Tarare,45.8964,4.4336,0,SA_TARARE
+SA_LYON,Lyon Part-Dieu,45.7605,4.8600,1,
+SP_LYON,Lyon Part-Dieu,45.7605,4.8600,0,SA_LYON
+SA_STET,Saint-Etienne Chateaucreux,45.4437,4.4008,1,
+SP_STET,Saint-Etienne Chateaucreux,45.4437,4.4008,0,SA_STET
+SA_SGDF,Saint-Germain-des-Fosses,46.2064,3.4308,1,
+SP_SGDF_1,Saint-Germain-des-Fosses,46.2064,3.4308,0,SA_SGDF
+SP_SGDF_2,Saint-Germain-des-Fosses,46.2064,3.4308,0,SA_SGDF
+SA_CLERM,Clermont-Ferrand,45.7660,3.0996,1,
+SP_CLERM,Clermont-Ferrand,45.7660,3.0996,0,SA_CLERM
+SA_LATE,Latecity,46.5000,4.5000,1,
+SP_LATE,Latecity,46.5000,4.5000,0,SA_LATE
+SA_SUNDAY,Sundayville,46.6000,4.6000,1,
+SP_SUNDAY,Sundayville,46.6000,4.6000,0,SA_SUNDAY
+SA_PARIS,Paris Gare de Lyon,48.8443,2.3730,1,
+SP_PARIS,Paris Gare de Lyon,48.8443,2.3730,0,SA_PARIS

@@ -1,0 +1,8 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+LYON,TER,,TER Roanne - Lyon,2
+STET,TER,,TER Roanne - Saint-Etienne,2
+VICHY,TER,,TER Roanne - Vichy,2
+CLERM,TER,,TER Saint-Germain - Clermont-Ferrand,2
+LATE,TER,,TER Roanne - Latecity,2
+SUN,TER,,TER Roanne - Sundayville,2
+FAST,TGV,,TGV Roanne - Paris,2

@@ -1,0 +1,11 @@
+route_id,service_id,trip_id,trip_headsign
+LYON,DAILY,LYON_0600,Lyon Part-Dieu
+LYON,DAILY,LYON_0720,Lyon Part-Dieu
+STET,DAILY,STET_0510,Saint-Etienne
+STET,DAILY,STET_0745,Saint-Etienne
+VICHY,DAILY,VICHY_0630,Vichy
+CLERM,DAILY,CLERM_0712,Clermont-Ferrand
+CLERM,DAILY,CLERM_0730,Clermont-Ferrand
+LATE,DAILY,LATE_0830,Latecity
+SUN,SUNDAY,SUN_0700,Sundayville
+FAST,DAILY,FAST_0600,Paris

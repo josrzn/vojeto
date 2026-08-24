@@ -1,0 +1,3 @@
+agency_id,agency_name,agency_url,agency_timezone
+TER,TER Auvergne-Rhone-Alpes,https://example.invalid,Europe/Paris
+TGV,TGV INOUI,https://example.invalid,Europe/Paris

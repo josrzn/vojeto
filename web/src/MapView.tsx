@@ -1,0 +1,278 @@
+import { useEffect, useRef } from "react";
+import maplibregl, {
+  type GeoJSONSource,
+  type Map as MapLibreMap,
+  type StyleSpecification,
+} from "maplibre-gl";
+import type { Feature, FeatureCollection } from "geojson";
+import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
+
+interface Props {
+  plan: Plan;
+  destinations: PlanDestination[];
+  selected: string | null;
+  onSelect: (stationId: string | null) => void;
+}
+
+const STATIONS_SOURCE = "stations";
+const ROUTE_SOURCE = "route";
+const STAGES_SOURCE = "stages";
+
+export function MapView({ plan, destinations, selected, onSelect }: Props) {
+  const container = useRef<HTMLDivElement>(null);
+  const map = useRef<MapLibreMap | null>(null);
+  const ready = useRef(false);
+  // The click handler is registered once, so it reads the current callback here
+  // rather than closing over a stale one.
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    if (!container.current || map.current) return;
+    let cancelled = false;
+    let instance: MapLibreMap | null = null;
+
+    void (async () => {
+      const style = await resolveStyle(plan.settings.mapStyleUrl);
+      if (cancelled || !container.current) return;
+
+      instance = new maplibregl.Map({
+        container: container.current,
+        style: style.spec,
+        center: [plan.home.lon, plan.home.lat],
+        zoom: 7,
+        attributionControl: { compact: true },
+      });
+      map.current = instance;
+      instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+
+      instance.on("load", () => {
+        if (!instance) return;
+        instance.addSource(ROUTE_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(STATIONS_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(STAGES_SOURCE, { type: "geojson", data: emptyCollection() });
+
+        instance.addLayer({
+          id: "route-casing",
+          type: "line",
+          source: ROUTE_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#ffffff", "line-width": 7, "line-opacity": 0.9 },
+        });
+        instance.addLayer({
+          id: "route-line",
+          type: "line",
+          source: ROUTE_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#d1495b", "line-width": 3.5 },
+        });
+
+        instance.addLayer({
+          id: "stage-stops",
+          type: "circle",
+          source: STAGES_SOURCE,
+          paint: {
+            "circle-radius": 5,
+            "circle-color": "#ffffff",
+            "circle-stroke-color": "#d1495b",
+            "circle-stroke-width": 2.5,
+          },
+        });
+
+        instance.addLayer({
+          id: "station-dots",
+          type: "circle",
+          source: STATIONS_SOURCE,
+          paint: {
+            "circle-radius": ["case", ["get", "isHome"], 7, ["get", "isSelected"], 8, 5],
+            "circle-color": [
+              "case",
+              ["get", "isHome"], "#1d3557",
+              ["get", "isSelected"], "#d1495b",
+              "#4c8577",
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2,
+          },
+        });
+
+        // Symbol layers need a glyph endpoint, which the offline fallback style
+        // has no way to provide, so labels are added only when one exists.
+        if (style.hasGlyphs) {
+          instance.addLayer({
+            id: "stage-labels",
+            type: "symbol",
+            source: STAGES_SOURCE,
+            layout: {
+              "text-field": ["get", "label"],
+              "text-size": 11,
+              "text-offset": [0, 1.3],
+              "text-anchor": "top",
+            },
+            paint: { "text-color": "#8a2f3d", "text-halo-color": "#ffffff", "text-halo-width": 1.5 },
+          });
+          instance.addLayer({
+            id: "station-labels",
+            type: "symbol",
+            source: STATIONS_SOURCE,
+            layout: {
+              "text-field": ["get", "name"],
+              "text-size": 12,
+              "text-offset": [0, 1.1],
+              "text-anchor": "top",
+              "text-allow-overlap": false,
+            },
+            paint: { "text-color": "#22303c", "text-halo-color": "#ffffff", "text-halo-width": 1.6 },
+          });
+        }
+
+        instance.on("click", "station-dots", (event) => {
+          const stationId = event.features?.[0]?.properties?.["stationId"];
+          if (typeof stationId === "string") onSelectRef.current(stationId);
+        });
+        for (const layer of ["station-dots", "stage-stops"]) {
+          instance.on("mouseenter", layer, () => {
+            instance?.getCanvas().style.setProperty("cursor", "pointer");
+          });
+          instance.on("mouseleave", layer, () => {
+            instance?.getCanvas().style.removeProperty("cursor");
+          });
+        }
+
+        ready.current = true;
+        // The data effects below may have run before the style finished loading.
+        instance.fire("vojeto.ready");
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      ready.current = false;
+      instance?.remove();
+      map.current = null;
+    };
+  }, [plan.settings.mapStyleUrl, plan.home.lat, plan.home.lon]);
+
+  // Station markers for the current month.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+
+    const paint = () => {
+      const source = instance.getSource(STATIONS_SOURCE) as GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData({
+        type: "FeatureCollection",
+        features: [
+          point(plan.home.lon, plan.home.lat, {
+            stationId: plan.home.stationId,
+            name: plan.home.name,
+            isHome: true,
+            isSelected: false,
+          }),
+          ...destinations.map((destination) =>
+            point(destination.lon, destination.lat, {
+              stationId: destination.stationId,
+              name: destination.name,
+              isHome: false,
+              isSelected: destination.stationId === selected,
+            }),
+          ),
+        ],
+      });
+    };
+
+    if (ready.current) paint();
+    else instance.once("vojeto.ready", paint);
+  }, [plan.home, destinations, selected]);
+
+  // The ride home for whichever destination is selected.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+
+    const paint = () => {
+      const routeSource = instance.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined;
+      const stagesSource = instance.getSource(STAGES_SOURCE) as GeoJSONSource | undefined;
+      if (!routeSource || !stagesSource) return;
+
+      const ride = selected ? plan.rides[selected] : undefined;
+      if (!ride) {
+        routeSource.setData(emptyCollection());
+        stagesSource.setData(emptyCollection());
+        return;
+      }
+
+      routeSource.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: {},
+            geometry: { type: "LineString", coordinates: ride.geometry },
+          },
+        ],
+      });
+
+      stagesSource.setData({
+        type: "FeatureCollection",
+        features: ride.stages.slice(0, -1).map((stage) =>
+          point(stage.end.lon, stage.end.lat, {
+            label: stage.bailout
+              ? `Night ${stage.day} · ${stage.bailout.name}`
+              : `Night ${stage.day}`,
+          }),
+        ),
+      });
+
+      const bounds = ride.geometry.reduce(
+        (box, [lon, lat]) => box.extend([lon!, lat!]),
+        new maplibregl.LngLatBounds(
+          [ride.geometry[0]![0]!, ride.geometry[0]![1]!],
+          [ride.geometry[0]![0]!, ride.geometry[0]![1]!],
+        ),
+      );
+      // Leave room for the detail panel, which sits over the left of the map.
+      const wide = instance.getContainer().clientWidth > 820;
+      instance.fitBounds(bounds, {
+        padding: { top: 80, bottom: 80, right: 80, left: wide ? 420 : 40 },
+        maxZoom: 11,
+        duration: 700,
+      });
+    };
+
+    if (ready.current) paint();
+    else instance.once("vojeto.ready", paint);
+  }, [plan.rides, selected]);
+
+  return <div className="map" ref={container} />;
+}
+
+/** A flat grey backdrop, so the app still works when the tile host is unreachable. */
+const OFFLINE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: "background", type: "background", paint: { "background-color": "#e8edf2" } }],
+};
+
+async function resolveStyle(
+  url: string,
+): Promise<{ spec: string | StyleSpecification; hasGlyphs: boolean }> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(String(response.status));
+    const spec = (await response.json()) as StyleSpecification;
+    return { spec, hasGlyphs: Boolean(spec.glyphs) };
+  } catch {
+    console.warn(`Map style ${url} is unreachable; falling back to a plain background.`);
+    return { spec: OFFLINE_STYLE, hasGlyphs: false };
+  }
+}
+
+function point(lon: number, lat: number, properties: Record<string, unknown>): Feature {
+  return { type: "Feature", properties, geometry: { type: "Point", coordinates: [lon, lat] } };
+}
+
+function emptyCollection(): FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
+}
