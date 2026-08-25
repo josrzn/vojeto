@@ -41,6 +41,7 @@ Everything personal lives in [`config/home.json`](config/home.json).
 | `bike.kmPerDay` | How far you actually want to ride in a day; sets where overnight stops fall. |
 | `bike.maxTotalKm` | Rides longer than this as the crow flies are not attempted. |
 | `bike.brouterUrl` | Point at `http://localhost:17777/brouter` to use your own BRouter. |
+| `gtfs.keepRouteTypes` | Optional. Restrict to specific `route_type` values (e.g. `[106]` for regional rail) instead of matching on names. |
 | `dayType` | `saturday`, `sunday` or `weekday` — which day each month's sample date lands on. |
 
 ### Moving house
@@ -73,16 +74,30 @@ want to stop early and take the train the rest of the way.
 
 ## Checking the route filter
 
-The feed's route labels change from time to time. If `plan` finds far too many
-or too few destinations, look at what the filter is doing:
+This is the one part that depends on how SNCF labels things this month, so it
+is the first place to look if the numbers seem wrong.
 
 ```sh
 npm run ingest -- --explain-routes
 ```
 
-It prints every distinct route label with `KEEP` or `drop`. Adjust
-`gtfs.keepRoutePatterns` / `gtfs.dropRoutePatterns` (JavaScript regular
-expressions, case-insensitive) to match.
+It reports how many routes were read, breaks them down by `route_type` with a
+rail/not-rail verdict, and lists the kept and dropped labels. **If nothing
+matches, `ingest` prints that same report automatically** — you never need a
+second run to find out why.
+
+Two ways to fix a mismatch:
+
+- **By name** — `gtfs.keepRoutePatterns` and `gtfs.dropRoutePatterns` are
+  case-insensitive regular expressions, matched against
+  `agency | short name | long name | description` (exactly the labels the
+  report lists). An empty `keepRoutePatterns` means "keep every rail route".
+- **By type** — set `gtfs.keepRouteTypes` to the `route_type` values you want,
+  taken from the report's breakdown. This bypasses name matching entirely, and
+  is the more stable option if the labels turn out to be inconsistent.
+
+Note that rail covers both `route_type` 2 and the extended range 100–117
+(102 is long distance, 106 regional), because feeds use both.
 
 ## Commands
 

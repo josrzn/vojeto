@@ -12,7 +12,13 @@ export interface Config {
     minTransferSeconds: number;
   };
   bike: { profile: string; kmPerDay: number; maxTotalKm: number; brouterUrl: string };
-  gtfs: { url: string; keepRoutePatterns: RegExp[]; dropRoutePatterns: RegExp[] };
+  gtfs: {
+    url: string;
+    keepRoutePatterns: RegExp[];
+    dropRoutePatterns: RegExp[];
+    /** Optional: restrict to these route_type values instead of "any rail type". */
+    keepRouteTypes: number[] | undefined;
+  };
   map: { styleUrl: string };
   /** Which day of the week each month's sample date should fall on. */
   dayType: "saturday" | "sunday" | "weekday";
@@ -22,7 +28,12 @@ interface RawConfig {
   home?: { query?: string; stopId?: string | null };
   trip?: Record<string, string | number>;
   bike?: Record<string, string | number>;
-  gtfs?: { url?: string; keepRoutePatterns?: string[]; dropRoutePatterns?: string[] };
+  gtfs?: {
+    url?: string;
+    keepRoutePatterns?: string[];
+    dropRoutePatterns?: string[];
+    keepRouteTypes?: number[];
+  };
   map?: { styleUrl?: string };
   dayType?: string;
 }
@@ -70,6 +81,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
       url: String(gtfs.url ?? ""),
       keepRoutePatterns: (gtfs.keepRoutePatterns ?? ["\\bTER\\b"]).map((p) => new RegExp(p, "i")),
       dropRoutePatterns: (gtfs.dropRoutePatterns ?? []).map((p) => new RegExp(p, "i")),
+      keepRouteTypes: gtfs.keepRouteTypes?.map(Number),
     },
     map: { styleUrl: String(raw.map?.styleUrl ?? "https://tiles.openfreemap.org/styles/liberty") },
     dayType: dayType as Config["dayType"],

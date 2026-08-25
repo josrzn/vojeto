@@ -9,6 +9,7 @@ import type {
 import { openMember } from "./archive.js";
 import { at, columnIndex, parseCsv } from "./csv.js";
 import { emptyCalendar } from "./calendar.js";
+import { diagnose, keepRoute, type RouteFilter, type RouteInfo } from "./routeFilter.js";
 import { parseTime } from "./time.js";
 
 export interface LoadOptions {
@@ -18,7 +19,9 @@ export interface LoadOptions {
   keepRoutePatterns: RegExp[];
   /** ...unless any of these matches, which wins over `keepRoutePatterns`. */
   dropRoutePatterns: RegExp[];
-  /** Print every distinct route label and whether it was kept, then continue. */
+  /** When set, restricts to these route_type values instead of "any rail type". */
+  keepRouteTypes?: number[];
+  /** Print the full route diagnostic, then continue. */
   explainRoutes?: boolean;
 }
 
@@ -77,8 +80,14 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
   );
 
   // --- routes ---------------------------------------------------------------
+  const filter: RouteFilter = {
+    keepPatterns: options.keepRoutePatterns,
+    dropPatterns: options.dropRoutePatterns,
+    ...(options.keepRouteTypes ? { keepTypes: options.keepRouteTypes } : {}),
+  };
+
+  const allRoutes: RouteInfo[] = [];
   const keptRoutes = new Map<string, string>();
-  const decisions = new Map<string, boolean>();
   await readTable(zipPath, "routes.txt", (row, header) => {
     const [id, agency, shortName, longName, desc, type] = columnIndex(
       header,
@@ -89,34 +98,34 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
       "route_desc",
       "route_type",
     );
-    const routeId = at(row, id!);
-    const agencyName = agencyNames.get(at(row, agency!)) ?? at(row, agency!);
-    const short = at(row, shortName!);
-    const long = at(row, longName!);
-    const label = [agencyName, short, long, at(row, desc!)].filter(Boolean).join(" | ");
-
-    // route_type 2 is rail; anything else in this feed is a replacement coach.
-    const isRail = at(row, type!) === "2" || at(row, type!) === "";
-    const keep =
-      isRail &&
-      options.keepRoutePatterns.some((re) => re.test(label)) &&
-      !options.dropRoutePatterns.some((re) => re.test(label));
-
-    decisions.set(label, keep);
-    if (keep) keptRoutes.set(routeId, long || short || routeId);
+    const info: RouteInfo = {
+      routeId: at(row, id!),
+      // Falls back to the raw agency_id when agency.txt has no matching row.
+      agencyName: agencyNames.get(at(row, agency!)) ?? at(row, agency!),
+      shortName: at(row, shortName!),
+      longName: at(row, longName!),
+      description: at(row, desc!),
+      routeType: at(row, type!),
+    };
+    allRoutes.push(info);
+    if (keepRoute(info, filter)) {
+      keptRoutes.set(info.routeId, info.longName || info.shortName || info.routeId);
+    }
   });
 
   if (options.explainRoutes) {
-    console.log("\nRoute labels found in the feed (kept / dropped):");
-    for (const [label, keep] of [...decisions].sort()) {
-      console.log(`  ${keep ? "KEEP" : "drop"}  ${label}`);
-    }
-    console.log("");
+    console.log(`\n${diagnose(allRoutes, filter)}\n`);
   }
-  console.log(`Routes: kept ${keptRoutes.size} of ${decisions.size} distinct labels`);
+  console.log(`Routes: kept ${keptRoutes.size} of ${allRoutes.length}`);
+
   if (keptRoutes.size === 0) {
+    // Print the diagnostic rather than asking for another run: re-running means
+    // re-reading the whole feed, and the answer is already in hand right here.
     throw new Error(
-      "No routes matched. Re-run with --explain-routes and adjust gtfs.keepRoutePatterns in config/home.json.",
+      "No routes matched the filter.\n\n" +
+        (options.explainRoutes ? "" : `${diagnose(allRoutes, filter)}\n\n`) +
+        "Adjust gtfs.keepRoutePatterns / gtfs.dropRoutePatterns (or set\n" +
+        "gtfs.keepRouteTypes to the route_type values you want) in config/home.json.",
     );
   }
 

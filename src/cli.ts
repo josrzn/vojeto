@@ -68,6 +68,7 @@ async function main(): Promise<void> {
         zipPath: feed,
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
+        ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
         explainRoutes: flags.explainRoutes,
       });
 
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
         zipPath: feed,
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
+        ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
       });
       const matches = searchStations(index, query);
       if (matches.length === 0) console.log(`No station matches ${JSON.stringify(query)}`);
@@ -105,6 +107,7 @@ async function main(): Promise<void> {
         zipPath: feed,
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
+        ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
         explainRoutes: flags.explainRoutes,
       });
       if (flags.brouter) config.bike.brouterUrl = flags.brouter;
