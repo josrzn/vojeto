@@ -58,12 +58,7 @@ export function groupIntoCorridors(
   return corridors;
 }
 
-export function formatHours(hours: number): string {
-  const whole = Math.floor(hours);
-  const minutes = Math.round((hours - whole) * 60);
-  if (minutes === 60) return `${whole + 1}h00`;
-  return `${whole}h${String(minutes).padStart(2, "0")}`;
-}
+export { formatHours, formatHoursCeil } from "../../src/shared/format.js";
 
 export function formatMinutes(minutes: number): string {
   return minutes < 60

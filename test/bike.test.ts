@@ -75,7 +75,7 @@ const options = (overrides: Partial<RideOptions> = {}): RideOptions => ({
   variants: [{ id: "trekking", label: "Quiet roads", profile: "trekking" }],
   alternatives: 1,
   effort: { speedKmh: 16, climbMetresPerHour: 600 },
-  budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6 },
+  budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6, minHours: 0 },
   trainHours: 1,
   ...overrides,
 });
@@ -173,21 +173,21 @@ describe("planRidesHome", () => {
   });
 
   it("marks a ride that fits the remaining budget", async () => {
-    const [variant] = (await ride({ budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6 } })).variants;
+    const [variant] = (await ride({ budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6, minHours: 0 } })).variants;
     expect(variant!.feasible).toBe(true);
     expect(variant!.days).toBe(1);
     expect(variant!.slackHours).toBeGreaterThan(0);
   });
 
   it("marks a ride that overruns a single day", async () => {
-    const [variant] = (await ride({ budget: { budgetHours: 4, maxDays: 1, hoursPerDay: 6 } })).variants;
+    const [variant] = (await ride({ budget: { budgetHours: 4, maxDays: 1, hoursPerDay: 6, minHours: 0 } })).variants;
     expect(variant!.feasible).toBe(false);
     expect(variant!.slackHours).toBeLessThan(0);
   });
 
   it("splits a long ride into days whose hours add up to the total", async () => {
     const [variant] = (await ride({
-      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5, minHours: 0 },
     })).variants;
     expect(variant!.days).toBeGreaterThan(1);
     expect(variant!.stages).toHaveLength(variant!.days);
@@ -199,7 +199,7 @@ describe("planRidesHome", () => {
 
   it("tags overnight stops with a nearby station to bail out from", async () => {
     const [variant] = (await ride({
-      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5, minHours: 0 },
     })).variants;
     // The final stage ends at home, so it never carries a bail-out.
     expect(variant!.stages.at(-1)!.bailout).toBeNull();
@@ -215,7 +215,7 @@ describe("planRidesHome", () => {
 
   it("leaves the overnight stop untagged when no station is near", async () => {
     const [variant] = (await ride({
-      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5, minHours: 0 },
       maxBailoutKm: 0.5,
     })).variants;
     expect(variant!.stages.slice(0, -1).every((s) => s.bailout === null)).toBe(true);
@@ -223,7 +223,7 @@ describe("planRidesHome", () => {
 
   it("shares the reported ascent out across the stages", async () => {
     const [variant] = (await ride({
-      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5, minHours: 0 },
     })).variants;
     const summed = variant!.stages.reduce((total, s) => total + s.ascentMetres, 0);
     expect(summed).toBeGreaterThan(variant!.ascentMetres - variant!.stages.length);

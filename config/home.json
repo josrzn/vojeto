@@ -19,8 +19,8 @@
     "$comment": "A change must fit between minTransferMinutes and maxTransferMinutes, and always happens within one station."
   },
   "ride": {
-    "$comment": "budgetHours is the whole outing including the train. maxDays 1 is a there-and-back day; raise it for overnight trips.",
-    "budgetHours": 7,
+    "$comment": "budgetHours is the whole outing including the train. minHours drops rides too short to be worth the fare. maxDays 1 is a there-and-back day; raise it for overnight trips.",
+    "budgetHours": 8,
     "maxDays": 1,
     "hoursPerDay": 6,
     "speedKmh": 16,
@@ -43,7 +43,8 @@
         "profile": "fastbike"
       }
     ],
-    "brouterUrl": "https://brouter.de/brouter"
+    "brouterUrl": "https://brouter.de/brouter",
+    "minHours": 3
   },
   "gtfs": {
     "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",

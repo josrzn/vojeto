@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { Plan } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
 import { TripDetail } from "./TripDetail.js";
-import { bestVariant, formatHours, formatMinutes, groupIntoCorridors } from "./corridors.js";
+import {
+  bestVariant,
+  formatHours,
+  formatHoursCeil,
+  formatMinutes,
+  groupIntoCorridors,
+} from "./corridors.js";
 
 type Load =
   | { status: "loading" }
@@ -15,6 +21,7 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [openCorridors, setOpenCorridors] = useState<Set<string>>(new Set());
+  const [showMisses, setShowMisses] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +84,12 @@ export function App() {
     variants.find((v) => v.id === variantId) ?? bestVariant(variants) ?? null;
 
   const stationCount = corridors.reduce((n, c) => n + c.destinations.length, 0);
+
+  // Stations the train reaches but the ride home overruns, cheapest first, so
+  // the budget needed to bring one in is visible rather than guessed at.
+  const outOfReach = load.plan.rejected
+    .filter((r) => r.verdict === "overruns" && r.neededBudgetHours !== null)
+    .sort((a, b) => a.neededBudgetHours! - b.neededBudgetHours!);
 
   const toggleCorridor = (name: string) =>
     setOpenCorridors((open) => {
@@ -184,6 +197,35 @@ export function App() {
             <li className="empty">Nothing reachable that you could ride back from in time.</li>
           )}
         </ul>
+
+        {outOfReach.length > 0 && (
+          <div className="misses">
+            <button
+              type="button"
+              className="misses-head"
+              onClick={() => setShowMisses((v) => !v)}
+              aria-expanded={showMisses}
+            >
+              {showMisses ? "▾" : "▸"} {outOfReach.length} just out of reach
+            </button>
+            {showMisses && (
+              <ul className="miss-list">
+                {outOfReach.map((miss) => (
+                  <li key={miss.stationId}>
+                    <span className="miss-name">{miss.name}</span>
+                    <span className="miss-figures">
+                      {Math.round(miss.km)} km · {formatHours(miss.hours)} riding +{" "}
+                      {formatHours(miss.trainHours)} train
+                    </span>
+                    <span className="miss-need">
+                      needs a {formatHoursCeil(miss.neededBudgetHours!)} day
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <footer className="colophon">
           Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at {settings.speedKmh} km/h

@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Config } from "../config.js";
 import type { Itinerary, TimetableIndex } from "../shared/types.js";
 import { formatDate, formatDuration, formatTime } from "../gtfs/time.js";
+import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
 import { maxRideKm } from "../bike/effort.js";
@@ -43,6 +44,20 @@ export interface PlanDestination {
   corridor: string;
 }
 
+export interface PlanRejection {
+  stationId: string;
+  name: string;
+  lat: number;
+  lon: number;
+  /** "tooShort" if the ride is not worth the fare, "overruns" if it is too long. */
+  verdict: "tooShort" | "overruns" | "unroutable";
+  km: number;
+  hours: number;
+  trainHours: number;
+  /** For "overruns": the budgetHours that would let this trip in. */
+  neededBudgetHours: number | null;
+}
+
 export interface Plan {
   generatedAt: string;
   home: { station: StationMatch; rideTo: Point };
@@ -50,6 +65,7 @@ export interface Plan {
   settings: {
     arriveBy: string;
     budgetHours: number;
+    minRideHours: number;
     maxDays: number;
     hoursPerDay: number;
     speedKmh: number;
@@ -64,7 +80,7 @@ export interface Plan {
   /** Keyed by station id and shared across months: the ride home never changes. */
   rides: Record<string, RideVariant[]>;
   /** Stations reached by train but with no ride home that fits the budget. */
-  rejected: Array<{ stationId: string; name: string; reason: string }>;
+  rejected: PlanRejection[];
 }
 
 export interface BuildOptions {
@@ -194,17 +210,20 @@ export async function buildPlan(
         console.warn(`  profile "${failure.id}" unavailable: ${failure.reason}`);
       }
 
-      const usable = result.variants.filter((v) => v.feasible);
+      // "Worth the fare" is a property of the place, not of the route you
+      // choose: if the most direct way home is short, dawdling back by a longer
+      // one does not make it a trip you needed a train for.
+      const shortest = result.variants.reduce<number>(
+        (least, v) => Math.min(least, v.hours),
+        Infinity,
+      );
+      const usable =
+        shortest < config.ride.budget.minHours
+          ? []
+          : result.variants.filter((v) => v.feasible);
+
       if (usable.length === 0) {
-        const best = result.variants[0];
-        rejected.push({
-          stationId: target.point.stationId,
-          name: target.point.name,
-          reason: best
-            ? `${best.km.toFixed(0)} km / ${best.hours.toFixed(1)} h riding does not fit ` +
-              `${config.ride.budget.budgetHours} h minus ${target.trainHours.toFixed(1)} h on the train`
-            : "no cycling route found",
-        });
+        rejected.push(diagnose(target, result.variants, config.ride.budget.minHours));
         continue;
       }
 
@@ -224,6 +243,32 @@ export async function buildPlan(
     for (const month of months) {
       month.destinations = month.destinations.filter((d) => routable.has(d.stationId));
     }
+
+    const tooShort = rejected.filter((r) => r.verdict === "tooShort");
+    if (tooShort.length > 0) {
+      console.log(
+        `\n${tooShort.length} dropped as not worth the fare ` +
+          `(under ${config.ride.budget.minHours} h riding): ` +
+          tooShort.map((r) => r.name).join(", "),
+      );
+    }
+
+    // The near misses are the useful ones: they say what budget would let each
+    // in, so the setting can be chosen rather than guessed at.
+    const overrunning = rejected
+      .filter((r) => r.verdict === "overruns" && r.neededBudgetHours !== null)
+      .sort((a, b) => a.neededBudgetHours! - b.neededBudgetHours!);
+    if (overrunning.length > 0) {
+      console.log(`\nJust out of reach on a ${config.ride.budget.budgetHours} h budget:`);
+      for (const miss of overrunning.slice(0, 12)) {
+        console.log(
+          `  ${miss.name.padEnd(30)} ${miss.km.toFixed(0).padStart(4)} km, ` +
+            `${formatHours(miss.hours)} riding + ${formatHours(miss.trainHours)} train ` +
+            `= needs a ${formatHoursCeil(miss.neededBudgetHours!)} day`,
+        );
+      }
+      if (overrunning.length > 12) console.log(`  ... and ${overrunning.length - 12} more`);
+    }
   }
 
   return {
@@ -242,6 +287,7 @@ export async function buildPlan(
       speedKmh: config.ride.effort.speedKmh,
       climbMetresPerHour: config.ride.effort.climbMetresPerHour,
       maxTransfers: config.trip.maxTransfers,
+      minRideHours: config.ride.budget.minHours,
       minTransferMinutes: config.trip.minTransferSeconds / 60,
       maxTransferMinutes: config.trip.maxTransferSeconds / 60,
       dayType: config.dayType,
@@ -250,6 +296,67 @@ export async function buildPlan(
     months,
     rides,
     rejected,
+  };
+}
+
+/**
+ * Explains why a station that the train reaches did not make the cut.
+ *
+ * The blamed variant is the one that came closest: the longest ride when they
+ * are all too short to be worth the fare, and otherwise the one needing the
+ * smallest budget, which is the number to raise if you want it in.
+ */
+function diagnose(
+  target: { point: StationMatch; trainHours: number },
+  variants: RideVariant[],
+  minHours: number,
+): PlanRejection {
+  const base = {
+    stationId: target.point.stationId,
+    name: target.point.name,
+    lat: target.point.lat,
+    lon: target.point.lon,
+    trainHours: target.trainHours,
+  };
+
+  if (variants.length === 0) {
+    return { ...base, verdict: "unroutable", km: 0, hours: 0, neededBudgetHours: null };
+  }
+
+  // The direct route decides whether the place was worth the fare, so that is
+  // the one to report back.
+  const shortest = variants.reduce((a, b) => (b.hours < a.hours ? b : a));
+  if (shortest.hours < minHours) {
+    return {
+      ...base,
+      verdict: "tooShort",
+      km: shortest.km,
+      hours: shortest.hours,
+      neededBudgetHours: null,
+    };
+  }
+
+  const overrunning = variants.filter((v) => v.verdict === "overruns");
+  if (overrunning.length === 0) {
+    const longest = variants.reduce((a, b) => (b.hours > a.hours ? b : a));
+    return {
+      ...base,
+      verdict: "tooShort",
+      km: longest.km,
+      hours: longest.hours,
+      neededBudgetHours: null,
+    };
+  }
+
+  const closest = overrunning.reduce((a, b) =>
+    (b.neededBudgetHours ?? Infinity) < (a.neededBudgetHours ?? Infinity) ? b : a,
+  );
+  return {
+    ...base,
+    verdict: "overruns",
+    km: closest.km,
+    hours: closest.hours,
+    neededBudgetHours: closest.neededBudgetHours,
   };
 }
 

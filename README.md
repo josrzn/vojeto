@@ -67,6 +67,23 @@ touring rule, so the numbers move predictably when you change the settings.
 BRouter's own estimate is shown alongside for comparison but is not used to
 decide anything.
 
+`minHours` drops the other end: somewhere you could simply have ridden to is not
+worth a train ticket. It is judged against the **most direct** way home, since
+that is how far the place really is — taking a longer route back does not turn a
+short hop into an outing.
+
+Stations that the train reaches but the ride overruns are not silently dropped.
+They are listed, with the budget each would need:
+
+```
+Just out of reach on a 8 h budget:
+  Rive-de-Gier      70 km, 5.9 h riding + 2.2 h train = needs 8.1 h
+  Vienne            84 km, 7.2 h riding + 2.3 h train = needs 9.5 h
+```
+
+so you can pick `budgetHours` from what it would actually buy you rather than
+guessing. The same list appears in the app under "just out of reach".
+
 For an overnight trip, raise `maxDays`. Day one gets whatever is left of
 `budgetHours` after the train; each later day gets `hoursPerDay`. The ride is
 then split at those points, and every overnight stop is tagged with the nearest

@@ -1,7 +1,7 @@
 import type { TimetableIndex } from "../shared/types.js";
 import { cumulativeDistances, haversine, nearest, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
-import { fitsBudget, rideHours, type Budget, type EffortModel } from "./effort.js";
+import { fitsBudget, rideHours, type Budget, type EffortModel, type Verdict } from "./effort.js";
 
 export interface BailoutStation {
   stationId: string;
@@ -34,8 +34,12 @@ export interface RideVariant {
   brouterHours: number;
   days: number;
   feasible: boolean;
+  /** Why it does or does not work: "fits", "tooShort" or "overruns". */
+  verdict: Verdict;
   /** Spare hours on the last day; negative means it overruns. */
   slackHours: number;
+  /** For "overruns": the budgetHours that would let this ride in. */
+  neededBudgetHours: number | null;
   stages: RideStage[];
   /** Simplified [lon, lat] polyline, small enough to ship to the browser. */
   geometry: number[][];
@@ -199,7 +203,9 @@ async function planOne(
     brouterHours: track.estimatedSeconds / 3600,
     days: verdict.days,
     feasible: verdict.feasible,
+    verdict: verdict.verdict,
     slackHours: verdict.slackHours,
+    neededBudgetHours: verdict.neededBudgetHours,
     stages,
     geometry: simplify(track.coordinates, 150),
   };

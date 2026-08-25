@@ -20,15 +20,38 @@ export interface Budget {
   maxDays: number;
   /** Riding hours available on each day after the first. */
   hoursPerDay: number;
+  /**
+   * Shortest ride worth catching a train for. Below this you may as well have
+   * ridden out too, so the destination is not really a trip.
+   */
+  minHours: number;
 }
+
+export type Verdict = "fits" | "tooShort" | "overruns";
 
 export interface Feasibility {
   feasible: boolean;
+  verdict: Verdict;
   /** Days the ride needs, whether or not that fits within maxDays. */
   days: number;
   /** Spare hours on the last day. Negative means it does not fit. */
   slackHours: number;
+  /**
+   * The `budgetHours` this ride would need, train included. Null unless the
+   * verdict is "overruns" — it is what tells you how much more time Lyon wants.
+   */
+  neededBudgetHours: number | null;
 }
+
+/**
+ * Slack for floating-point comparison, in hours — about four milliseconds.
+ *
+ * Without it `neededBudgetHours` is a lie: (train + ride) - train can land a
+ * fraction below `ride`, so the very budget we advertise would reject the trip.
+ * These are estimates accurate to tens of minutes, so comparing them to the
+ * last bit is false precision regardless.
+ */
+const EPSILON = 1e-6;
 
 export function rideHours(km: number, ascentMetres: number, model: EffortModel): number {
   const flat = model.speedKmh > 0 ? km / model.speedKmh : Infinity;
@@ -43,24 +66,50 @@ export function rideHours(km: number, ascentMetres: number, model: EffortModel):
  * later days get `hoursPerDay` each.
  */
 export function fitsBudget(trainHours: number, hours: number, budget: Budget): Feasibility {
-  const firstDay = budget.budgetHours - trainHours;
-  if (firstDay <= 0) {
-    return { feasible: false, days: Infinity, slackHours: firstDay };
-  }
-  if (hours <= firstDay) {
-    return { feasible: true, days: 1, slackHours: firstDay - hours };
-  }
-  if (budget.maxDays <= 1 || budget.hoursPerDay <= 0) {
-    return { feasible: false, days: Infinity, slackHours: firstDay - hours };
+  // Checked before anything else: a ride too short to be worth the fare is not
+  // rescued by having plenty of time, or by being spread over several days.
+  if (hours < budget.minHours - EPSILON) {
+    return {
+      feasible: false,
+      verdict: "tooShort",
+      days: 1,
+      slackHours: budget.budgetHours - trainHours - hours,
+      neededBudgetHours: null,
+    };
   }
 
+  const overruns = (slackHours: number): Feasibility => ({
+    feasible: false,
+    verdict: "overruns",
+    days: Infinity,
+    slackHours,
+    // What the whole outing would take if you simply allowed the time.
+    neededBudgetHours: trainHours + hours,
+  });
+
+  const firstDay = budget.budgetHours - trainHours;
+  if (firstDay <= 0) return overruns(firstDay);
+  if (hours <= firstDay + EPSILON) {
+    return {
+      feasible: true,
+      verdict: "fits",
+      days: 1,
+      slackHours: firstDay - hours,
+      neededBudgetHours: null,
+    };
+  }
+  if (budget.maxDays <= 1 || budget.hoursPerDay <= 0) return overruns(firstDay - hours);
+
   const remaining = hours - firstDay;
-  const extraDays = Math.ceil(remaining / budget.hoursPerDay);
+  const extraDays = Math.ceil(remaining / budget.hoursPerDay - EPSILON);
   const days = 1 + extraDays;
+  if (days > budget.maxDays) return { ...overruns(firstDay - hours), days };
   return {
-    feasible: days <= budget.maxDays,
+    feasible: true,
+    verdict: "fits",
     days,
     slackHours: extraDays * budget.hoursPerDay - remaining,
+    neededBudgetHours: null,
   };
 }
 

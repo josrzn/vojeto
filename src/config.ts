@@ -122,6 +122,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
         budgetHours,
         maxDays: Math.max(1, num(ride["maxDays"], 1)),
         hoursPerDay: num(ride["hoursPerDay"], budgetHours),
+        minHours: Math.max(0, num(ride["minHours"], 0)),
       },
       effort: {
         speedKmh: num(ride["speedKmh"], 16),

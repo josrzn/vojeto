@@ -178,6 +178,42 @@ code {
 
 .empty { padding: 1rem 0.65rem; font-size: 0.85rem; color: #93a1b0; }
 
+.misses {
+  border-top: 1px solid var(--line);
+  padding: 0.5rem 1.25rem 0.6rem;
+}
+.misses-head {
+  border: none;
+  background: none;
+  padding: 0.15rem 0;
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.misses-head:hover { color: var(--ink); }
+
+.miss-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+.miss-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  border-left: 3px solid var(--line);
+  padding-left: 0.55rem;
+}
+.miss-name { font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); }
+.miss-figures { font-size: 0.72rem; color: #93a1b0; }
+.miss-need { font-size: 0.72rem; color: var(--bike); }
+
 .colophon {
   border-top: 1px solid var(--line);
   padding: 0.7rem 1.25rem;

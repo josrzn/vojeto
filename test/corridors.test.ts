@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { bestVariant, formatHours, groupIntoCorridors } from "../web/src/corridors.js";
+import {
+  bestVariant,
+  formatHours,
+  formatHoursCeil,
+  groupIntoCorridors,
+} from "../web/src/corridors.js";
 import type { PlanDestination } from "../src/build/buildPlan.js";
 import type { RideVariant } from "../src/bike/returnRoute.js";
 
@@ -33,7 +38,9 @@ const variant = (km: number, feasible = true, id = "trekking"): RideVariant => (
   brouterHours: km / 18,
   days: 1,
   feasible,
+  verdict: feasible ? "fits" : "overruns",
   slackHours: feasible ? 1 : -1,
+  neededBudgetHours: feasible ? null : 9,
   stages: [],
   geometry: [],
 });
@@ -113,5 +120,23 @@ describe("formatHours", () => {
 
   it("carries a rounded 60 minutes into the next hour", () => {
     expect(formatHours(3.999)).toBe("4h00");
+  });
+});
+
+describe("formatHoursCeil", () => {
+  it("never rounds down, so a needed budget is never reported as one you have", () => {
+    // 8.0001 h against an 8 h budget must not read back as "8h00".
+    expect(formatHoursCeil(8.0001)).toBe("8h01");
+    expect(formatHoursCeil(8)).toBe("8h00");
+  });
+
+  it("agrees with formatHours on exact minutes", () => {
+    for (const hours of [0, 0.25, 1.5, 4, 9.5]) {
+      expect(formatHoursCeil(hours)).toBe(formatHours(hours));
+    }
+  });
+
+  it("handles a non-finite value rather than printing NaN", () => {
+    expect(formatHoursCeil(Infinity)).toBe("—");
   });
 });
