@@ -21,6 +21,8 @@ export interface PlanLeg {
   towards: string;
   /** The train number, when the feed puts one in trip_headsign. */
   trainNumber: string;
+  /** Minutes spent waiting at the station before this leg. 0 on the first. */
+  waitMinutes: number;
 }
 
 export interface PlanDestination {
@@ -35,6 +37,8 @@ export interface PlanDestination {
   travelMinutes: number;
   transfers: number;
   legs: PlanLeg[];
+  /** The longest wait at any change, which is what makes a trip tiresome. */
+  worstWaitMinutes: number;
   /** The line of the final leg, used to group stations onto one corridor. */
   corridor: string;
 }
@@ -51,6 +55,8 @@ export interface Plan {
     speedKmh: number;
     climbMetresPerHour: number;
     maxTransfers: number;
+    minTransferMinutes: number;
+    maxTransferMinutes: number;
     dayType: string;
     mapStyleUrl: string;
   };
@@ -103,6 +109,7 @@ export async function buildPlan(
       maxTravelSeconds: config.trip.maxTravelSeconds,
       maxTransfers: config.trip.maxTransfers,
       minTransferSeconds: config.trip.minTransferSeconds,
+      maxTransferSeconds: config.trip.maxTransferSeconds,
     });
 
     const destinations: PlanDestination[] = [];
@@ -235,6 +242,8 @@ export async function buildPlan(
       speedKmh: config.ride.effort.speedKmh,
       climbMetresPerHour: config.ride.effort.climbMetresPerHour,
       maxTransfers: config.trip.maxTransfers,
+      minTransferMinutes: config.trip.minTransferSeconds / 60,
+      maxTransferMinutes: config.trip.maxTransferSeconds / 60,
       dayType: config.dayType,
       mapStyleUrl: config.map.styleUrl,
     },
@@ -245,7 +254,7 @@ export async function buildPlan(
 }
 
 function toDestination(itinerary: Itinerary): PlanDestination {
-  const legs = itinerary.legs.map((leg) => {
+  const legs = itinerary.legs.map((leg, i) => {
     // The SNCF feed puts the train number in trip_headsign rather than a
     // destination, so a numeric value is labelled as such instead of
     // being shown as "towards 886917".
@@ -258,6 +267,8 @@ function toDestination(itinerary: Itinerary): PlanDestination {
       route: leg.routeName,
       towards: isTrainNumber ? "" : leg.headsign,
       trainNumber: isTrainNumber ? leg.headsign.trim() : "",
+      waitMinutes:
+        i === 0 ? 0 : Math.round((leg.departure - itinerary.legs[i - 1]!.arrival) / 60),
     };
   });
 
@@ -272,6 +283,7 @@ function toDestination(itinerary: Itinerary): PlanDestination {
     travelMinutes: Math.round(itinerary.duration / 60),
     transfers: itinerary.transfers,
     legs,
+    worstWaitMinutes: Math.max(0, ...legs.map((l) => l.waitMinutes)),
     // Stations along one line make near-identical trips at different lengths,
     // so the line of the last leg is what the UI groups them by.
     corridor: legs.at(-1)?.route ?? "",

@@ -130,6 +130,7 @@ describe("loading a feed that uses SNCF id conventions", () => {
       maxTravelSeconds: 4 * 3600,
       maxTransfers: 2,
       minTransferSeconds: 300,
+      maxTransferSeconds: 3600,
     });
     expect(results.map((r) => r.destinationName).sort()).toEqual([
       "Lyon Part Dieu",
@@ -153,6 +154,7 @@ describe("loading a feed that uses SNCF id conventions", () => {
       maxTravelSeconds: 4 * 3600,
       maxTransfers: 2,
       minTransferSeconds: 300,
+      maxTransferSeconds: 3600,
     });
     // Amplepuis stays out even here: its route is route_type 3, a coach, which
     // the rail check rejects independently of the stop kind filter.
@@ -181,6 +183,7 @@ describe("loading a feed that uses SNCF id conventions", () => {
       maxTravelSeconds: 4 * 3600,
       maxTransfers: 2,
       minTransferSeconds: 300,
+      maxTransferSeconds: 3600,
     });
     // Only once route_type 3 is explicitly allowed does the coach appear.
     expect(results.map((r) => r.destinationName)).toContain("Amplepuis");

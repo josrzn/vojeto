@@ -161,7 +161,8 @@ export function App() {
                               {destination.departure} → {destination.arrival} ·{" "}
                               {destination.travel}
                               {destination.transfers > 0 &&
-                                ` · ${destination.transfers} change${destination.transfers > 1 ? "s" : ""}`}
+                                ` · ${destination.transfers} change${destination.transfers > 1 ? "s" : ""}` +
+                                  ` (${destination.worstWaitMinutes} min)`}
                             </span>
                             {ride && (
                               <span className="result-ride">

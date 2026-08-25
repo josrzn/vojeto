@@ -23,7 +23,15 @@ export interface Query {
   arriveNoEarlierThan: ServiceTime;
   maxTravelSeconds: number;
   maxTransfers: number;
+  /** Shortest interchange you are willing to run for. */
   minTransferSeconds: number;
+  /**
+   * Longest you are willing to stand on a platform waiting.
+   *
+   * Without this a connection can technically exist but be useless: an hour
+   * killed at 6am is not a trip you would actually take.
+   */
+  maxTransferSeconds: number;
 }
 
 /** A vehicle boarding, kept per (round, stop) so itineraries can be rebuilt. */
@@ -162,10 +170,13 @@ function runRaptor(
         const currentDeparture = tripIndex >= 0 ? trips[tripIndex]!.times[pos * 2 + 1]! : INF;
         if (ready > currentDeparture) continue;
         const candidate = earliestTripFrom(trips, pos, ready);
-        if (candidate >= 0 && (tripIndex === -1 || candidate < tripIndex)) {
-          tripIndex = candidate;
-          boardPos = pos;
-        }
+        if (candidate < 0 || (tripIndex !== -1 && candidate >= tripIndex)) continue;
+        // The earliest catchable trip is also the shortest wait, so if even
+        // that one leaves too late, no trip here makes a usable connection.
+        const latestUseful = previous.arrival[stop]! + query.maxTransferSeconds;
+        if (trips[candidate]!.times[pos * 2 + 1]! > latestUseful) continue;
+        tripIndex = candidate;
+        boardPos = pos;
       }
     }
 

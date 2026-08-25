@@ -29,6 +29,11 @@ export function TripDetail({ destination, variants, active, onPickVariant, onClo
       <ol className="legs">
         {destination.legs.map((leg, i) => (
           <li key={i}>
+            {i > 0 && (
+              <span className="leg-change">
+                change at {leg.from} · {leg.waitMinutes} min
+              </span>
+            )}
             <span className="leg-time">
               {leg.departure} – {leg.arrival}
             </span>

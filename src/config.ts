@@ -17,6 +17,7 @@ export interface Config {
     maxTravelSeconds: number;
     maxTransfers: number;
     minTransferSeconds: number;
+    maxTransferSeconds: number;
   };
   ride: {
     budget: Budget;
@@ -113,7 +114,8 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
       ),
       maxTravelSeconds: Number(trip["maxTravelMinutes"] ?? 240) * 60,
       maxTransfers: Number(trip["maxTransfers"] ?? 0),
-      minTransferSeconds: Number(trip["minTransferMinutes"] ?? 5) * 60,
+      minTransferSeconds: Number(trip["minTransferMinutes"] ?? 10) * 60,
+      maxTransferSeconds: Number(trip["maxTransferMinutes"] ?? 30) * 60,
     },
     ride: {
       budget: {

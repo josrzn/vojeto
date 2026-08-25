@@ -18,6 +18,7 @@ const destination = (
   travelMinutes,
   transfers: 0,
   legs: [],
+  worstWaitMinutes: 0,
   corridor,
 });
 

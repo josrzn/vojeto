@@ -102,13 +102,29 @@ the server rejects is reported once and skipped — the other routes still build
   "arriveNoEarlierThan": "06:30",
   "earliestDeparture": "05:00",
   "maxTravelMinutes": 240,
-  "maxTransfers": 0,
-  "minTransferMinutes": 5
+  "maxTransfers": 1,
+  "minTransferMinutes": 10,
+  "maxTransferMinutes": 30
 }
 ```
 
-`maxTransfers` defaults to `0`, since a bike and a tight connection are a bad
-combination. Raising it to 2 roughly quadruples the destinations.
+Counting changes is not enough — they have to be worth making. A change is only
+accepted if the wait falls between `minTransferMinutes` and
+`maxTransferMinutes`:
+
+- **Too short** and you are running for it with a bike, and one late train ends
+  the day. Ten minutes is the floor by default.
+- **Too long** and the connection exists on paper but the trip does not: forty
+  minutes on a cold platform at 6am is not an outing you would choose.
+
+This is enforced inside the routing, not filtered afterwards, which matters:
+when the quickest pairing has an awkward wait, the router looks for a different
+one rather than dropping the destination. From Roanne, Sain-Bel was reached at
+06:54 by way of a five minute scramble; under a 10-30 minute window it comes
+back as 07:08 -> 08:24 with a comfortable 24 minute change.
+
+Changes also only ever happen **within a single station** — never a cross-town
+hop between, say, Lyon Part-Dieu and Lyon Perrache.
 
 ### Moving house
 

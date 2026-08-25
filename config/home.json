@@ -2,36 +2,55 @@
   "$comment": "Everything user-specific lives here.",
   "home": {
     "$comment": "`station` is where you catch the train out; `rideTo` is where the ride home ends. Decimal or DMS both work.",
-    "station": { "query": "Roanne", "stopId": null },
-    "rideTo": "46°02'03.80\"N 4°04'45.63\"E"
+    "station": {
+      "query": "Roanne",
+      "stopId": null
+    },
+    "rideTo": "46\u00b002'03.80\"N 4\u00b004'45.63\"E"
   },
   "trip": {
     "arriveBy": "09:00",
     "arriveNoEarlierThan": "06:30",
     "earliestDeparture": "05:00",
     "maxTravelMinutes": 240,
-    "maxTransfers": 0,
-    "minTransferMinutes": 5
+    "maxTransfers": 1,
+    "minTransferMinutes": 10,
+    "maxTransferMinutes": 30,
+    "$comment": "A change must fit between minTransferMinutes and maxTransferMinutes, and always happens within one station."
   },
   "ride": {
     "$comment": "budgetHours is the whole outing including the train. maxDays 1 is a there-and-back day; raise it for overnight trips.",
-    "budgetHours": 6,
+    "budgetHours": 7,
     "maxDays": 1,
     "hoursPerDay": 6,
     "speedKmh": 16,
     "climbMetresPerHour": 600,
     "alternatives": 2,
     "variants": [
-      { "id": "trekking", "label": "Quiet roads", "profile": "trekking" },
-      { "id": "gravel", "label": "Gravel", "profile": "gravel" },
-      { "id": "fast", "label": "Direct", "profile": "fastbike" }
+      {
+        "id": "trekking",
+        "label": "Quiet roads",
+        "profile": "trekking"
+      },
+      {
+        "id": "gravel",
+        "label": "Gravel",
+        "profile": "gravel"
+      },
+      {
+        "id": "fast",
+        "label": "Direct",
+        "profile": "fastbike"
+      }
     ],
     "brouterUrl": "https://brouter.de/brouter"
   },
   "gtfs": {
     "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
     "$comment": "The SNCF feed encodes service type in the stop point id, not in routes.txt. Run `npm run ingest -- --explain-routes` to list the kinds this feed contains.",
-    "keepStopKinds": ["OCETrain TER"],
+    "keepStopKinds": [
+      "OCETrain TER"
+    ],
     "keepRoutePatterns": [],
     "dropRoutePatterns": []
   },

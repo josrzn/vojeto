@@ -28,6 +28,7 @@ function query(date: number, overrides: Partial<Query> = {}): Itinerary[] {
     maxTravelSeconds: 4 * 3600,
     maxTransfers: 2,
     minTransferSeconds: 300,
+    maxTransferSeconds: 3600,
     ...overrides,
   });
 }
@@ -98,6 +99,47 @@ describe("reachableStations", () => {
     const faster = relaxed.find((r) => r.destinationName === "Clermont-Ferrand");
     expect(faster?.legs.map((l) => l.tripId)).toEqual(["VICHY_0630", "CLERM_0712"]);
     expect(faster?.arrival).toBe(8 * 3600 + 2 * 60);
+  });
+
+  it("refuses a connection with a long dead wait on the platform", () => {
+    // Roanne 06:30 -> Saint-Germain 07:10, then 20 minutes standing about.
+    const patient = query(20260914).find((r) => r.destinationName === "Clermont-Ferrand");
+    expect(patient?.legs.map((l) => l.tripId)).toEqual(["VICHY_0630", "CLERM_0730"]);
+
+    // With 18 minutes the most you will wait, that itinerary is out. Rather
+    // than losing Clermont, the router takes the later, slower pairing whose
+    // connection is comfortable: 07:05 -> 07:50, wait 15, 08:05 -> 08:59.
+    const impatient = query(20260914, { maxTransferSeconds: 18 * 60 });
+    const found = impatient.find((r) => r.destinationName === "Clermont-Ferrand");
+    expect(found?.legs.map((l) => l.tripId)).toEqual(["VICHY_0705", "CLERM_0805"]);
+    expect(found?.departure).toBe(7 * 3600 + 5 * 60);
+    expect(found?.arrival).toBe(8 * 3600 + 59 * 60);
+  });
+
+  it("drops a destination whose every connection is an awkward wait", () => {
+    // 12 minutes rules out both pairings; nothing else reaches Clermont.
+    const results = query(20260914, { maxTransferSeconds: 12 * 60 });
+    expect(results.map((r) => r.destinationName)).not.toContain("Clermont-Ferrand");
+    // Stations needing no change are unaffected.
+    expect(results.map((r) => r.destinationName)).toContain("Lyon Part-Dieu");
+  });
+
+  it("accepts a wait of exactly the maximum", () => {
+    const results = query(20260914, { maxTransferSeconds: 20 * 60 });
+    const clermont = results.find((r) => r.destinationName === "Clermont-Ferrand");
+    expect(clermont?.legs.map((l) => l.tripId)).toEqual(["VICHY_0630", "CLERM_0730"]);
+  });
+
+  it("keeps every reported wait inside the configured window", () => {
+    const minTransferSeconds = 5 * 60;
+    const maxTransferSeconds = 25 * 60;
+    for (const itinerary of query(20260914, { minTransferSeconds, maxTransferSeconds })) {
+      for (let i = 1; i < itinerary.legs.length; i++) {
+        const wait = itinerary.legs[i]!.departure - itinerary.legs[i - 1]!.arrival;
+        expect(wait).toBeGreaterThanOrEqual(minTransferSeconds);
+        expect(wait).toBeLessThanOrEqual(maxTransferSeconds);
+      }
+    }
   });
 
   it("drops journeys that need more transfers than allowed", () => {

@@ -242,6 +242,13 @@ code {
 }
 .stages li { border-left-color: var(--bike); }
 
+.leg-change {
+  font-size: 0.72rem;
+  color: #93a1b0;
+  font-style: italic;
+  margin-bottom: 0.2rem;
+}
+
 .leg-time, .stage-day { font-size: 0.78rem; font-weight: 600; }
 .leg-where, .stage-figures { font-size: 0.83rem; }
 .leg-route, .stage-stop { font-size: 0.75rem; color: var(--ink-soft); }
