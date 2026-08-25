@@ -6,11 +6,14 @@ import maplibregl, {
 } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
+import type { RideVariant } from "../../src/bike/returnRoute.js";
 
 interface Props {
   plan: Plan;
   destinations: PlanDestination[];
   selected: string | null;
+  /** The way home currently being shown, or null when nothing is selected. */
+  variant: RideVariant | null;
   onSelect: (stationId: string | null) => void;
 }
 
@@ -18,7 +21,7 @@ const STATIONS_SOURCE = "stations";
 const ROUTE_SOURCE = "route";
 const STAGES_SOURCE = "stages";
 
-export function MapView({ plan, destinations, selected, onSelect }: Props) {
+export function MapView({ plan, destinations, selected, variant, onSelect }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const ready = useRef(false);
@@ -39,7 +42,7 @@ export function MapView({ plan, destinations, selected, onSelect }: Props) {
       instance = new maplibregl.Map({
         container: container.current,
         style: style.spec,
-        center: [plan.home.lon, plan.home.lat],
+        center: [plan.home.rideTo.lon, plan.home.rideTo.lat],
         zoom: 7,
         attributionControl: { compact: true },
       });
@@ -151,7 +154,7 @@ export function MapView({ plan, destinations, selected, onSelect }: Props) {
       instance?.remove();
       map.current = null;
     };
-  }, [plan.settings.mapStyleUrl, plan.home.lat, plan.home.lon]);
+  }, [plan.settings.mapStyleUrl, plan.home.rideTo.lat, plan.home.rideTo.lon]);
 
   // Station markers for the current month.
   useEffect(() => {
@@ -164,10 +167,16 @@ export function MapView({ plan, destinations, selected, onSelect }: Props) {
       source.setData({
         type: "FeatureCollection",
         features: [
-          point(plan.home.lon, plan.home.lat, {
-            stationId: plan.home.stationId,
-            name: plan.home.name,
+          point(plan.home.rideTo.lon, plan.home.rideTo.lat, {
+            stationId: "",
+            name: "Home",
             isHome: true,
+            isSelected: false,
+          }),
+          point(plan.home.station.lon, plan.home.station.lat, {
+            stationId: plan.home.station.stationId,
+            name: plan.home.station.name,
+            isHome: false,
             isSelected: false,
           }),
           ...destinations.map((destination) =>
@@ -196,7 +205,7 @@ export function MapView({ plan, destinations, selected, onSelect }: Props) {
       const stagesSource = instance.getSource(STAGES_SOURCE) as GeoJSONSource | undefined;
       if (!routeSource || !stagesSource) return;
 
-      const ride = selected ? plan.rides[selected] : undefined;
+      const ride = variant;
       if (!ride) {
         routeSource.setData(emptyCollection());
         stagesSource.setData(emptyCollection());
@@ -243,7 +252,7 @@ export function MapView({ plan, destinations, selected, onSelect }: Props) {
 
     if (ready.current) paint();
     else instance.once("vojeto.ready", paint);
-  }, [plan.rides, selected]);
+  }, [variant]);
 
   return <div className="map" ref={container} />;
 }

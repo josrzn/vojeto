@@ -73,7 +73,7 @@ async function main(): Promise<void> {
         explainRoutes: flags.explainRoutes,
       });
 
-      const home = resolveHome(index, config.home);
+      const home = resolveHome(index, config.home.station);
       const dates = sampleDates(index.feedStart, index.plannableEnd, config.dayType);
       console.log(
         `\nFeed declares ${formatDate(index.feedStart)} to ${formatDate(index.feedEnd)}; ` +
@@ -81,6 +81,10 @@ async function main(): Promise<void> {
           ` (${dates.length} months)`,
       );
       console.log(`Home resolves to ${home.name} (${home.stationId})`);
+      console.log(
+        `Ride home ends at ${config.home.rideTo.lat.toFixed(5)}, ` +
+          `${config.home.rideTo.lon.toFixed(5)}`,
+      );
       console.log(`Sample dates: ${dates.map((d) => d.date).map(formatDate).join(", ")}`);
       break;
     }
@@ -114,7 +118,7 @@ async function main(): Promise<void> {
         keepStopKinds: config.gtfs.keepStopKinds,
         explainRoutes: flags.explainRoutes,
       });
-      if (flags.brouter) config.bike.brouterUrl = flags.brouter;
+      if (flags.brouter) config.ride.brouterUrl = flags.brouter;
       const plan = await buildPlan(index, config, {
         cacheDir: CACHE_DIR,
         skipBike: flags.skipBike,

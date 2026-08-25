@@ -4,9 +4,9 @@ Take the train out in the morning, ride the bike home.
 
 Given a home station, this works out every station you can reach by TER in time
 to be off the train by a set hour, for one sample date per month the SNCF feed
-covers, and plans a cycling route back from each. The result is a static site:
-pick a month, scan the list, click a station to see the trains out and the ride
-home.
+covers, plans several cycling routes back from each, and keeps the ones whose
+**train out plus ride home fits the time you actually have**. The result is a
+static site: pick a month, open a line, click a station to compare ways home.
 
 ![The planner](docs/screenshot.png)
 
@@ -22,32 +22,98 @@ npm run plan        # build public/data/plan.json
 npm run dev         # http://localhost:5173
 ```
 
-`ingest` is worth running on its own the first time: it prints which routes the
-filter kept, which station your home resolved to, and which dates it will plan
-for. `plan` then does the real work — expect it to take a few minutes, most of
-it waiting on BRouter.
+`ingest` is worth running on its own the first time: it prints which services the
+filter kept, which station your home resolved to, where the ride home ends, and
+which dates it will plan for. `plan` then does the real work — one BRouter
+request per station per variant, throttled to one a second and cached on disk,
+so the first run takes a few minutes and later ones are quick.
 
 ## Configuration
 
 Everything personal lives in [`config/home.json`](config/home.json).
 
-| Key | Meaning |
-| --- | --- |
-| `home.query` | Station name to depart from. Set `home.stopId` instead if the name is ambiguous — `npm run stations -- <name>` lists candidates. |
-| `trip.arriveBy` | Be off the train by this time. |
-| `trip.arriveNoEarlierThan` | Arriving before this is pointless, so those trains are ignored. |
-| `trip.maxTravelMinutes` | Longest acceptable journey out. |
-| `trip.maxTransfers` | 0 for direct trains only. |
-| `bike.kmPerDay` | How far you actually want to ride in a day; sets where overnight stops fall. |
-| `bike.maxTotalKm` | Rides longer than this as the crow flies are not attempted. |
-| `bike.brouterUrl` | Point at `http://localhost:17777/brouter` to use your own BRouter. |
-| `gtfs.keepStopKinds` | Which services to keep, e.g. `["OCETrain TER"]`. This is the filter that matters — see below. |
-| `gtfs.keepRouteTypes` | Optional. Restrict to specific `route_type` values. Rarely needed. |
-| `dayType` | `saturday`, `sunday` or `weekday` — which day each month's sample date lands on. |
+### Where you start and where you finish
+
+```json
+"home": {
+  "station": { "query": "Roanne", "stopId": null },
+  "rideTo": "46°02'03.80\"N 4°04'45.63\"E"
+}
+```
+
+`station` is where you catch the train; `rideTo` is where the ride home ends,
+which is usually your door rather than the station. `rideTo` takes decimal
+degrees (`46.034389, 4.079342`) or DMS as copied out of a mapping app. Use
+`stopId` instead of `query` if the station name is ambiguous —
+`npm run stations -- <name>` lists candidates.
+
+### How much time you have
+
+This is the constraint that decides what shows up.
+
+```json
+"ride": {
+  "budgetHours": 6,
+  "maxDays": 1,
+  "hoursPerDay": 6,
+  "speedKmh": 16,
+  "climbMetresPerHour": 600
+}
+```
+
+A destination is kept only if `train out + ride home` fits `budgetHours`. Riding
+time is estimated as `km / speedKmh + ascent / climbMetresPerHour` — the usual
+touring rule, so the numbers move predictably when you change the settings.
+BRouter's own estimate is shown alongside for comparison but is not used to
+decide anything.
+
+For an overnight trip, raise `maxDays`. Day one gets whatever is left of
+`budgetHours` after the train; each later day gets `hoursPerDay`. The ride is
+then split at those points, and every overnight stop is tagged with the nearest
+station in case you want to give up and take the train.
+
+### Ways home
+
+```json
+"alternatives": 2,
+"variants": [
+  { "id": "trekking", "label": "Quiet roads", "profile": "trekking" },
+  { "id": "gravel",   "label": "Gravel",      "profile": "gravel"   },
+  { "id": "fast",     "label": "Direct",      "profile": "fastbike" }
+]
+```
+
+Each profile is requested `alternatives` times, using BRouter's
+`alternativeidx`, giving up to `profiles x alternatives` ways home per station.
+Identical results are dropped, and each is checked against the budget
+separately — a gravel route can be too slow for a day when the direct one fits.
+
+`profile` must be a profile the BRouter server actually has. `trekking`,
+`fastbike` and `shortest` are always present; **`gravel` and other extras depend
+on the server**, so check what yours offers (the profile dropdown at
+[brouter.de/brouter-web](https://brouter.de/brouter-web/) lists them). A profile
+the server rejects is reported once and skipped — the other routes still build.
+
+### Trains
+
+```json
+"trip": {
+  "arriveBy": "09:00",
+  "arriveNoEarlierThan": "06:30",
+  "earliestDeparture": "05:00",
+  "maxTravelMinutes": 240,
+  "maxTransfers": 0,
+  "minTransferMinutes": 5
+}
+```
+
+`maxTransfers` defaults to `0`, since a bike and a tight connection are a bad
+combination. Raising it to 2 roughly quadruples the destinations.
 
 ### Moving house
 
-Change `home.query`, re-run `npm run plan`. Nothing else is home-specific.
+Change `home.station.query` and `home.rideTo`, re-run `npm run plan`. Nothing
+else is home-specific.
 
 ## What the numbers mean, and what they don't
 
@@ -77,11 +143,18 @@ TGV, Intercités and OUIGO are excluded because all three require a paid bike
 reservation, and replacement coaches because they will not take a bike at all.
 Check before you rely on a specific train.
 
-**The ride home is a suggestion.** BRouter's `trekking` profile prefers quiet
-roads and cycle paths, but it does not know about seasonal closures, gravel, or
-what you find pleasant. Distances and ascent come from BRouter; the day splits
-are just the total divided evenly, tagged with the nearest station in case you
-want to stop early and take the train the rest of the way.
+**The ride home is a suggestion.** BRouter knows the road network, not seasonal
+closures, surface condition after rain, or what you find pleasant. Distances and
+ascent come from BRouter; the riding time is this project's own estimate, and
+the "to spare" figure inherits all of that uncertainty. Treat a route with ten
+minutes of slack as a coin flip.
+
+**Stations on one line are a difficulty ladder, not duplicates.** Most of what
+comes back from a given home station sits on a handful of lines, and going one
+stop further out mostly buys a longer ride over similar ground. The app groups
+stations by the line of your final leg for exactly this reason: a corridor
+collapses to one row showing the range of rides it offers, and opens into the
+stations along it, ordered by ride length. Four lines beat 110 flat rows.
 
 ## Checking the route filter
 
@@ -137,8 +210,8 @@ Useful flags (after `--`):
 | --- | --- |
 | `src/gtfs/` | Download the feed, stream-parse the CSV, filter to TER by stop kind, measure the usable date range, build a routable index of stop patterns. |
 | `src/router/raptor.ts` | RAPTOR. Run once per morning departure from home, keeping the best journey per station that lands inside the arrival window. |
-| `src/bike/` | BRouter client (disk-cached) and the ride-home planner: day splits, ascent, bail-out stations. |
-| `src/build/` | Pick a date per month, run both halves, emit `public/data/plan.json`. |
+| `src/bike/` | BRouter client (disk-cached), the effort model that turns distance and climb into hours, and the ride planner: variants, day splits, bail-out stations. |
+| `src/build/` | Pick a date per month, run both halves, keep what fits the budget, emit `public/data/plan.json`. |
 | `web/` | React + MapLibre front end. Reads only `plan.json`, so the built site is fully static. |
 
 The generated `plan.json` is the entire contract between the two halves — the
@@ -153,6 +226,9 @@ without touching the real service:
 npx tsx scripts/fake-brouter.ts 17777
 npm run plan -- --brouter http://127.0.0.1:17777/brouter
 ```
+
+It varies its output by profile and alternative, so the variant picker has
+something to show. The distances are invented — do not read anything into them.
 
 If the map style host is unreachable, the map falls back to a plain background
 and still plots stations and routes.

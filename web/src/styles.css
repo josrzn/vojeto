@@ -86,13 +86,41 @@ code {
   color: #93a1b0;
 }
 
-.results {
+.corridors {
   list-style: none;
   margin: 0;
-  padding: 0 0.75rem 1rem;
+  padding: 0 0.5rem 1rem;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+}
+
+.corridor + .corridor { margin-top: 0.15rem; }
+
+.corridor-head {
+  display: grid;
+  grid-template-columns: 1rem 1fr;
+  gap: 0.1rem 0.4rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  cursor: pointer;
+}
+.corridor-head:hover { background: var(--panel); }
+.corridor-head.is-active { background: var(--panel); }
+
+.corridor-caret { color: #93a1b0; font-size: 0.75rem; line-height: 1.4; }
+.corridor-name { font-weight: 600; font-size: 0.86rem; }
+.corridor-range { grid-column: 2; font-size: 0.74rem; color: #93a1b0; }
+
+.results {
+  list-style: none;
+  margin: 0.15rem 0 0.5rem;
+  padding: 0 0 0 1.4rem;
 }
 
 .result {
@@ -116,6 +144,37 @@ code {
 .result-name { font-weight: 600; font-size: 0.92rem; }
 .result-train { font-size: 0.78rem; color: var(--ink-soft); }
 .result-ride { font-size: 0.78rem; color: var(--bike); }
+
+.variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+.variant {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.variant:hover { border-color: #b9c4d1; }
+.variant.is-active {
+  border-color: var(--bike);
+  background: #fdf0f2;
+}
+.variant.is-over { opacity: 0.55; }
+.variant.is-over .variant-figures { text-decoration: line-through; }
+.variant-label { font-size: 0.78rem; font-weight: 600; }
+.variant-figures { font-size: 0.72rem; color: var(--ink-soft); }
+
+.detail-slack { margin: 0.2rem 0 0; font-size: 0.78rem; color: #4c8577; }
+.detail-note { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--bike); }
 
 .empty { padding: 1rem 0.65rem; font-size: 0.85rem; color: #93a1b0; }
 
@@ -151,7 +210,7 @@ code {
   color: #93a1b0;
 }
 .detail-summary { margin: 0; font-size: 0.83rem; color: var(--ink-soft); }
-.detail-note { margin: 0; font-size: 0.83rem; color: var(--bike); }
+
 
 .detail-close {
   position: absolute;

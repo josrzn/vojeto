@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
-import { planRideHome, simplify, type RideOptions } from "../src/bike/returnRoute.js";
+import { planRidesHome, simplify, type RideOptions } from "../src/bike/returnRoute.js";
 import { routeBike } from "../src/bike/brouter.js";
 import { cumulativeDistances, haversine } from "../src/shared/geo.js";
 
@@ -70,23 +70,38 @@ afterAll(async () => {
 
 const options = (overrides: Partial<RideOptions> = {}): RideOptions => ({
   baseUrl,
-  profile: "trekking",
   cacheDir,
   throttleMs: 0,
-  kmPerDay: 90,
-  maxTotalKm: 400,
+  variants: [{ id: "trekking", label: "Quiet roads", profile: "trekking" }],
+  alternatives: 1,
+  effort: { speedKmh: 16, climbMetresPerHour: 600 },
+  budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6 },
+  trainHours: 1,
   ...overrides,
 });
 
+const brouter = (overrides: Partial<RideOptions> = {}) => ({
+  baseUrl,
+  cacheDir,
+  throttleMs: 0,
+  profile: "trekking",
+  ...overrides,
+});
+
+// Spread roughly along the Lyon -> Roanne line, plus one far away that should
+// never be picked.
 const STATIONS = [
-  { stationId: "SA_TARARE", name: "Tarare", lat: 45.8964, lon: 4.4336 },
   { stationId: "SA_LYON", name: "Lyon Part-Dieu", lat: 45.7605, lon: 4.86 },
+  { stationId: "SA_TARARE", name: "Tarare", lat: 45.8964, lon: 4.4336 },
+  { stationId: "SA_LOZANNE", name: "Lozanne", lat: 45.8567, lon: 4.6844 },
+  { stationId: "SA_AMPLEPUIS", name: "Amplepuis", lat: 45.96, lon: 4.331 },
+  { stationId: "SA_REGNY", name: "Régny", lat: 46.0169, lon: 4.1889 },
   { stationId: "SA_FAR", name: "Far Away", lat: 44.0, lon: 2.0 },
 ];
 
 describe("routeBike", () => {
   it("reads distance, ascent and time out of the BRouter response", async () => {
-    const track = await routeBike([LYON, ROANNE], options());
+    const track = await routeBike([LYON, ROANNE], brouter());
     expect(track.ascentMetres).toBe(612);
     expect(track.estimatedSeconds).toBe(18000);
     expect(track.metres).toBeGreaterThan(60_000);
@@ -95,62 +110,124 @@ describe("routeBike", () => {
 
   it("serves a repeated request from the disk cache", async () => {
     const before = requests;
-    await routeBike([LYON, ROANNE], options());
-    await routeBike([LYON, ROANNE], options());
+    await routeBike([LYON, ROANNE], brouter());
+    await routeBike([LYON, ROANNE], brouter());
     expect(requests).toBe(before);
   });
 
   it("reports BRouter's plain-text errors instead of failing to parse", async () => {
     respondWith = "operation not supported: no route found";
     await expect(
-      routeBike([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }], options()),
+      routeBike([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }], brouter()),
     ).rejects.toThrow(/no route found/);
     respondWith = null;
   });
 
   it("refuses a single waypoint", async () => {
-    await expect(routeBike([LYON], options())).rejects.toThrow(/at least two/);
+    await expect(routeBike([LYON], brouter())).rejects.toThrow(/at least two/);
   });
 });
 
-describe("planRideHome", () => {
-  it("splits the ride into whole days that add up to the total", async () => {
-    const ride = await planRideHome(LYON, ROANNE, STATIONS, options({ kmPerDay: 30 }));
-    expect(ride.days).toBe(Math.ceil(ride.km / 30));
-    expect(ride.stages).toHaveLength(ride.days);
-    const summed = ride.stages.reduce((total, stage) => total + stage.km, 0);
-    expect(summed).toBeCloseTo(ride.km, 6);
+describe("planRidesHome", () => {
+  const ride = async (overrides: Partial<RideOptions> = {}) =>
+    planRidesHome(LYON, ROANNE, STATIONS, options(overrides));
+
+  it("returns one variant per profile and alternative", async () => {
+    const result = await ride({
+      variants: [
+        { id: "trekking", label: "Quiet roads", profile: "trekking" },
+        { id: "fast", label: "Direct", profile: "fastbike" },
+      ],
+      alternatives: 1,
+    });
+    expect(result.variants.map((v) => v.id)).toEqual(["trekking", "fast"]);
+    expect(result.failures).toEqual([]);
   });
 
-  it("keeps a short ride as a single day with no overnight stop", async () => {
-    const ride = await planRideHome(LYON, ROANNE, STATIONS, options({ kmPerDay: 200 }));
-    expect(ride.days).toBe(1);
-    expect(ride.stages[0]!.bailout).toBeNull();
+  it("drops an alternative that retraces the same road", async () => {
+    // The stub returns an identical track whatever alternativeidx is asked for.
+    const result = await ride({ alternatives: 3 });
+    expect(result.variants).toHaveLength(1);
   });
 
-  it("shares the reported ascent out across the stages", async () => {
-    const ride = await planRideHome(LYON, ROANNE, STATIONS, options({ kmPerDay: 30 }));
-    const summed = ride.stages.reduce((total, stage) => total + stage.ascentMetres, 0);
-    expect(summed).toBeGreaterThan(ride.ascentMetres - ride.stages.length);
-    expect(summed).toBeLessThan(ride.ascentMetres + ride.stages.length);
+  it("reports a profile the server rejects without losing the others", async () => {
+    // A fresh cache dir and an unused profile name, so the request really goes
+    // to the server rather than being answered from an earlier test's cache.
+    const isolated = await mkdtemp(path.join(tmpdir(), "vojeto-fail-"));
+    respondWith = "profile not found";
+    const result = await ride({
+      cacheDir: isolated,
+      variants: [{ id: "nope", label: "Missing", profile: "no-such-profile" }],
+    });
+    respondWith = null;
+    await rm(isolated, { recursive: true, force: true });
+    expect(result.variants).toEqual([]);
+    expect(result.failures[0]?.reason).toMatch(/profile not found/);
   });
 
-  it("tags each overnight stop with a station to bail out from", async () => {
-    const ride = await planRideHome(LYON, ROANNE, STATIONS, options({ kmPerDay: 30 }));
-    const bailouts = ride.stages.slice(0, -1).map((stage) => stage.bailout);
-    expect(bailouts.every((b) => b !== null)).toBe(true);
-    expect(bailouts.some((b) => b?.name === "Tarare")).toBe(true);
-    for (const bailout of bailouts) expect(bailout!.detourKm).toBeLessThanOrEqual(15);
+  it("estimates hours from distance and climb, not from BRouter", async () => {
+    const [variant] = (await ride()).variants;
+    // 612 m of ascent at 600 m/h is just over an hour on top of the flat time.
+    expect(variant!.hours).toBeCloseTo(variant!.km / 16 + 612 / 600, 5);
+    expect(variant!.brouterHours).toBeCloseTo(5, 5);
+  });
+
+  it("marks a ride that fits the remaining budget", async () => {
+    const [variant] = (await ride({ budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6 } })).variants;
+    expect(variant!.feasible).toBe(true);
+    expect(variant!.days).toBe(1);
+    expect(variant!.slackHours).toBeGreaterThan(0);
+  });
+
+  it("marks a ride that overruns a single day", async () => {
+    const [variant] = (await ride({ budget: { budgetHours: 4, maxDays: 1, hoursPerDay: 6 } })).variants;
+    expect(variant!.feasible).toBe(false);
+    expect(variant!.slackHours).toBeLessThan(0);
+  });
+
+  it("splits a long ride into days whose hours add up to the total", async () => {
+    const [variant] = (await ride({
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+    })).variants;
+    expect(variant!.days).toBeGreaterThan(1);
+    expect(variant!.stages).toHaveLength(variant!.days);
+    const summedHours = variant!.stages.reduce((total, s) => total + s.hours, 0);
+    expect(summedHours).toBeCloseTo(variant!.hours, 5);
+    const summedKm = variant!.stages.reduce((total, s) => total + s.km, 0);
+    expect(summedKm).toBeCloseTo(variant!.km, 5);
+  });
+
+  it("tags overnight stops with a nearby station to bail out from", async () => {
+    const [variant] = (await ride({
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+    })).variants;
+    // The final stage ends at home, so it never carries a bail-out.
+    expect(variant!.stages.at(-1)!.bailout).toBeNull();
+
+    const overnight = variant!.stages.slice(0, -1);
+    expect(overnight.length).toBeGreaterThan(0);
+    expect(overnight.some((s) => s.bailout !== null)).toBe(true);
+    for (const stage of overnight) {
+      if (stage.bailout) expect(stage.bailout.detourKm).toBeLessThanOrEqual(15);
+    }
+    expect(overnight.map((s) => s.bailout?.name)).not.toContain("Far Away");
   });
 
   it("leaves the overnight stop untagged when no station is near", async () => {
-    const ride = await planRideHome(
-      LYON,
-      ROANNE,
-      STATIONS,
-      options({ kmPerDay: 30, maxBailoutKm: 0.5 }),
-    );
-    expect(ride.stages.slice(0, -1).every((stage) => stage.bailout === null)).toBe(true);
+    const [variant] = (await ride({
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+      maxBailoutKm: 0.5,
+    })).variants;
+    expect(variant!.stages.slice(0, -1).every((s) => s.bailout === null)).toBe(true);
+  });
+
+  it("shares the reported ascent out across the stages", async () => {
+    const [variant] = (await ride({
+      budget: { budgetHours: 3, maxDays: 4, hoursPerDay: 1.5 },
+    })).variants;
+    const summed = variant!.stages.reduce((total, s) => total + s.ascentMetres, 0);
+    expect(summed).toBeGreaterThan(variant!.ascentMetres - variant!.stages.length);
+    expect(summed).toBeLessThan(variant!.ascentMetres + variant!.stages.length);
   });
 });
 

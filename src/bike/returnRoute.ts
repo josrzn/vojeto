@@ -1,6 +1,7 @@
 import type { TimetableIndex } from "../shared/types.js";
 import { cumulativeDistances, haversine, nearest, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
+import { fitsBudget, rideHours, type Budget, type EffortModel } from "./effort.js";
 
 export interface BailoutStation {
   stationId: string;
@@ -13,29 +14,55 @@ export interface RideStage {
   day: number;
   km: number;
   ascentMetres: number;
+  hours: number;
   end: Point;
   /** Nearest station to the overnight stop, if you want to cut the ride short. */
   bailout: BailoutStation | null;
 }
 
-export interface RideHome {
+/** One way home: a profile paired with one of BRouter's alternative lines. */
+export interface RideVariant {
+  id: string;
+  label: string;
+  profile: string;
+  alternative: number;
   km: number;
   ascentMetres: number;
-  /** BRouter's time estimate for the profile, in hours, excluding stops. */
-  ridingHours: number;
+  /** Our own estimate, from distance and climb. */
+  hours: number;
+  /** BRouter's estimate for the profile, kept for comparison. */
+  brouterHours: number;
   days: number;
+  feasible: boolean;
+  /** Spare hours on the last day; negative means it overruns. */
+  slackHours: number;
   stages: RideStage[];
   /** Simplified [lon, lat] polyline, small enough to ship to the browser. */
   geometry: number[][];
 }
 
-export interface RideOptions extends BRouterOptions {
-  /** How far you actually want to ride in a day. */
-  kmPerDay: number;
-  /** Routes longer than this are reported but flagged as unrealistic. */
-  maxTotalKm: number;
+export interface VariantSpec {
+  id: string;
+  label: string;
+  profile: string;
+}
+
+export interface RideOptions extends Omit<BRouterOptions, "profile" | "alternative"> {
+  variants: VariantSpec[];
+  /** How many of BRouter's alternative lines to ask for per profile. */
+  alternatives: number;
+  effort: EffortModel;
+  budget: Budget;
+  /** Hours already spent on the train, which come out of the day's budget. */
+  trainHours: number;
   /** A station further than this from an overnight stop is not a useful escape. */
   maxBailoutKm?: number;
+}
+
+export interface RideResult {
+  variants: RideVariant[];
+  /** Profiles the server would not route, so they can be reported once. */
+  failures: Array<{ id: string; reason: string }>;
 }
 
 /** Every distinct station in the feed that has usable coordinates. */
@@ -57,56 +84,174 @@ export function stationPoints(
 }
 
 /**
- * Plans the ride from a destination station back to home, split into days.
+ * Plans every configured way of riding from a station back home.
  *
- * Splits fall wherever the running distance crosses a multiple of `kmPerDay`,
- * and each one is tagged with the nearest station so an overnight stop doubles
- * as a place to give up and take the train.
+ * A failed profile is reported rather than thrown: a server without a `gravel`
+ * profile should still give you the trekking route.
  */
-export async function planRideHome(
+export async function planRidesHome(
   from: Point,
   home: Point,
   stations: Array<Point & { stationId: string; name: string }>,
   options: RideOptions,
-): Promise<RideHome> {
-  const track = await routeBike([from, home], options);
+): Promise<RideResult> {
+  const variants: RideVariant[] = [];
+  const failures: RideResult["failures"] = [];
+
+  for (const spec of options.variants) {
+    for (let alternative = 0; alternative < Math.max(1, options.alternatives); alternative++) {
+      const id = alternative === 0 ? spec.id : `${spec.id}-${alternative + 1}`;
+      try {
+        variants.push(
+          await planOne(from, home, stations, options, spec, alternative, id),
+        );
+      } catch (error) {
+        failures.push({ id, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
+  // Two alternatives from one profile are often the same road; drop repeats.
+  const unique: RideVariant[] = [];
+  for (const variant of variants) {
+    const duplicate = unique.some(
+      (kept) =>
+        kept.profile === variant.profile && Math.abs(kept.km - variant.km) < 0.05,
+    );
+    if (!duplicate) unique.push(variant);
+  }
+
+  unique.sort((a, b) => Number(b.feasible) - Number(a.feasible) || a.hours - b.hours);
+  return { variants: unique, failures };
+}
+
+async function planOne(
+  from: Point,
+  home: Point,
+  stations: Array<Point & { stationId: string; name: string }>,
+  options: RideOptions,
+  spec: VariantSpec,
+  alternative: number,
+  id: string,
+): Promise<RideVariant> {
+  const track = await routeBike([from, home], {
+    baseUrl: options.baseUrl,
+    cacheDir: options.cacheDir,
+    profile: spec.profile,
+    alternative,
+    ...(options.throttleMs !== undefined ? { throttleMs: options.throttleMs } : {}),
+  });
+
   // Distances are measured off the returned polyline rather than taken from
   // BRouter's own track-length, so the stage lengths always add up to the total.
-  const totals = cumulativeDistances(track.coordinates);
-  const totalMetres = totals.at(-1) ?? 0;
+  const distances = cumulativeDistances(track.coordinates);
+  const totalMetres = distances.at(-1) ?? 0;
   const km = totalMetres / 1000;
-  const days = Math.max(1, Math.ceil(km / options.kmPerDay));
 
-  // BRouter's filtered ascent is the trustworthy total; raw per-vertex deltas
-  // are only used to share it out between stages in the right proportion.
-  const rawAscents = stageRawAscents(track.coordinates, totals, days, totalMetres);
-  const rawTotal = rawAscents.reduce((sum, value) => sum + value, 0);
+  const effortHours = cumulativeEffort(track.coordinates, distances, options.effort);
+  const totalHours = effortHours.at(-1) ?? 0;
+  // The headline figure uses BRouter's filtered ascent, which is steadier than
+  // summing raw per-vertex elevation deltas; the per-segment totals above are
+  // only used to decide where the days should break.
+  const hours = rideHours(km, track.ascentMetres, options.effort);
+  const verdict = fitsBudget(options.trainHours, hours, options.budget);
 
+  const boundaries = dayBoundaries(hours, options.trainHours, options.budget, verdict.days);
   const stages: RideStage[] = [];
-  for (let day = 1; day <= days; day++) {
-    const endMetres = day === days ? totalMetres : (totalMetres / days) * day;
-    const vertex = vertexAt(totals, endMetres);
-    const end: Point = { lon: track.coordinates[vertex]![0]!, lat: track.coordinates[vertex]![1]! };
-    const startMetres = day === 1 ? 0 : (totalMetres / days) * (day - 1);
+  let previousVertex = 0;
+  let previousHours = 0;
 
+  for (let day = 0; day < boundaries.length; day++) {
+    const untilHours = boundaries[day]!;
+    const vertex =
+      day === boundaries.length - 1
+        ? track.coordinates.length - 1
+        : vertexAtEffort(effortHours, (untilHours / hours) * totalHours);
+    const end: Point = {
+      lon: track.coordinates[vertex]![0]!,
+      lat: track.coordinates[vertex]![1]!,
+    };
     stages.push({
-      day,
-      km: (endMetres - startMetres) / 1000,
-      ascentMetres:
-        rawTotal > 0 ? Math.round((track.ascentMetres * rawAscents[day - 1]!) / rawTotal) : 0,
+      day: day + 1,
+      km: (distances[vertex]! - distances[previousVertex]!) / 1000,
+      ascentMetres: Math.round(
+        track.ascentMetres * fraction(effortHours, previousVertex, vertex, totalHours),
+      ),
+      hours: untilHours - previousHours,
       end,
-      bailout: day === days ? null : findBailout(end, stations, options.maxBailoutKm ?? 15),
+      bailout:
+        day === boundaries.length - 1
+          ? null
+          : findBailout(end, stations, options.maxBailoutKm ?? 15),
     });
+    previousVertex = vertex;
+    previousHours = untilHours;
   }
 
   return {
+    id,
+    label: spec.label,
+    profile: spec.profile,
+    alternative,
     km,
     ascentMetres: track.ascentMetres,
-    ridingHours: track.estimatedSeconds / 3600,
-    days,
+    hours,
+    brouterHours: track.estimatedSeconds / 3600,
+    days: verdict.days,
+    feasible: verdict.feasible,
+    slackHours: verdict.slackHours,
     stages,
     geometry: simplify(track.coordinates, 150),
   };
+}
+
+/** Cumulative hours of effort at each vertex, by the same model as rideHours. */
+function cumulativeEffort(
+  coordinates: number[][],
+  distances: number[],
+  model: EffortModel,
+): number[] {
+  const hours = new Array<number>(coordinates.length).fill(0);
+  for (let i = 1; i < coordinates.length; i++) {
+    const km = (distances[i]! - distances[i - 1]!) / 1000;
+    const climb = Math.max(0, (coordinates[i]![2] ?? 0) - (coordinates[i - 1]![2] ?? 0));
+    hours[i] = hours[i - 1]! + rideHours(km, climb, model);
+  }
+  return hours;
+}
+
+/** Running total of hours at which each day should end. */
+function dayBoundaries(
+  hours: number,
+  trainHours: number,
+  budget: Budget,
+  days: number,
+): number[] {
+  if (!Number.isFinite(days) || days <= 1) return [hours];
+  const firstDay = Math.max(0, budget.budgetHours - trainHours);
+  const boundaries: number[] = [];
+  for (let day = 0; day < days - 1; day++) {
+    boundaries.push(Math.min(hours, firstDay + day * budget.hoursPerDay));
+  }
+  boundaries.push(hours);
+  return boundaries;
+}
+
+function fraction(effortHours: number[], from: number, to: number, total: number): number {
+  if (total <= 0) return 0;
+  return (effortHours[to]! - effortHours[from]!) / total;
+}
+
+/** First vertex at or past `hours` of cumulative effort. */
+function vertexAtEffort(effortHours: number[], hours: number): number {
+  let low = 0;
+  let high = effortHours.length - 1;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (effortHours[mid]! < hours) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 function findBailout(
@@ -121,34 +266,6 @@ function findBailout(
     name: closest.item.name,
     detourKm: closest.metres / 1000,
   };
-}
-
-/** First vertex at or past `metres` along the track. */
-function vertexAt(totals: number[], metres: number): number {
-  let low = 0;
-  let high = totals.length - 1;
-  while (low < high) {
-    const mid = (low + high) >>> 1;
-    if (totals[mid]! < metres) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
-function stageRawAscents(
-  coordinates: number[][],
-  totals: number[],
-  days: number,
-  totalMetres: number,
-): number[] {
-  const ascents = new Array<number>(days).fill(0);
-  for (let i = 1; i < coordinates.length; i++) {
-    const climb = (coordinates[i]![2] ?? 0) - (coordinates[i - 1]![2] ?? 0);
-    if (climb <= 0) continue;
-    const day = Math.min(days - 1, Math.floor((totals[i]! / totalMetres) * days));
-    ascents[day] = ascents[day]! + climb;
-  }
-  return ascents;
 }
 
 /**

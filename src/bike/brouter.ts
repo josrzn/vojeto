@@ -8,6 +8,8 @@ export interface BRouterOptions {
   baseUrl: string;
   profile: string;
   cacheDir: string;
+  /** Which of BRouter's alternative lines to return, 0 being the primary. */
+  alternative?: number;
   /** Pause between live requests. The public instance is donated hardware. */
   throttleMs?: number;
 }
@@ -43,7 +45,8 @@ export async function routeBike(
   const lonlats = waypoints.map((p) => `${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join("|");
   const url =
     `${options.baseUrl}?lonlats=${encodeURIComponent(lonlats)}` +
-    `&profile=${encodeURIComponent(options.profile)}&alternativeidx=0&format=geojson`;
+    `&profile=${encodeURIComponent(options.profile)}` +
+    `&alternativeidx=${options.alternative ?? 0}&format=geojson`;
 
   const key = createHash("sha256").update(url).digest("hex").slice(0, 32);
   const cachePath = path.join(options.cacheDir, `${key}.json`);

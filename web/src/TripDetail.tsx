@@ -1,13 +1,16 @@
-import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
+import type { PlanDestination } from "../../src/build/buildPlan.js";
+import type { RideVariant } from "../../src/bike/returnRoute.js";
+import { formatHours } from "./corridors.js";
 
 interface Props {
-  home: string;
   destination: PlanDestination;
-  ride: Plan["rides"][string] | null;
+  variants: RideVariant[];
+  active: RideVariant | null;
+  onPickVariant: (id: string) => void;
   onClose: () => void;
 }
 
-export function TripDetail({ home, destination, ride, onClose }: Props) {
+export function TripDetail({ destination, variants, active, onPickVariant, onClose }: Props) {
   return (
     <section className="detail">
       <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
@@ -33,7 +36,11 @@ export function TripDetail({ home, destination, ride, onClose }: Props) {
               {leg.from} → {leg.to}
             </span>
             <span className="leg-route">
-              {[leg.route, leg.towards && `towards ${leg.towards}`, leg.trainNumber && `train ${leg.trainNumber}`]
+              {[
+                leg.route,
+                leg.towards && `towards ${leg.towards}`,
+                leg.trainNumber && `train ${leg.trainNumber}`,
+              ]
                 .filter(Boolean)
                 .join(" · ")}
             </span>
@@ -41,34 +48,77 @@ export function TripDetail({ home, destination, ride, onClose }: Props) {
         ))}
       </ol>
 
-      <h3>Ride back to {home}</h3>
-      {!ride ? (
+      <h3>Ride home</h3>
+      {variants.length === 0 ? (
         <p className="detail-note">No cycling route was found for this station.</p>
       ) : (
         <>
-          <p className="detail-summary">
-            {Math.round(ride.km)} km · +{ride.ascentMetres} m · about{" "}
-            {ride.ridingHours.toFixed(1)} h riding
-            {ride.days > 1 && ` · ${ride.days} days`}
-          </p>
-          {ride.days > 1 && (
-            <ol className="stages">
-              {ride.stages.map((stage) => (
-                <li key={stage.day}>
-                  <span className="stage-day">Day {stage.day}</span>
-                  <span className="stage-figures">
-                    {Math.round(stage.km)} km · +{stage.ascentMetres} m
-                  </span>
-                  <span className="stage-stop">
-                    {stage.day === ride.days
-                      ? `arrive ${home}`
-                      : stage.bailout
-                        ? `stop near ${stage.bailout.name} (${stage.bailout.detourKm.toFixed(1)} km off route — train home from there if you have had enough)`
-                        : "stop in open country, no station nearby"}
-                  </span>
-                </li>
-              ))}
-            </ol>
+          <div className="variants" role="tablist">
+            {variants.map((variant) => (
+              <button
+                key={variant.id}
+                type="button"
+                role="tab"
+                aria-selected={variant.id === active?.id}
+                className={
+                  [
+                    "variant",
+                    variant.id === active?.id ? "is-active" : "",
+                    variant.feasible ? "" : "is-over",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                }
+                onClick={() => onPickVariant(variant.id)}
+                title={variant.feasible ? undefined : "Does not fit the time budget"}
+              >
+                <span className="variant-label">
+                  {variant.label}
+                  {variant.alternative > 0 && ` ${variant.alternative + 1}`}
+                </span>
+                <span className="variant-figures">
+                  {Math.round(variant.km)} km · {formatHours(variant.hours)}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {active && (
+            <>
+              <p className="detail-summary">
+                {Math.round(active.km)} km · +{active.ascentMetres} m ·{" "}
+                {formatHours(active.hours)} riding
+                {active.days > 1 && ` · ${active.days} days`}
+              </p>
+              <p className={active.feasible ? "detail-slack" : "detail-note"}>
+                {active.feasible
+                  ? `${formatHours(Math.max(0, active.slackHours))} to spare`
+                  : `${formatHours(Math.abs(active.slackHours))} over budget`}
+                {" · BRouter reckons "}
+                {formatHours(active.brouterHours)}
+              </p>
+
+              {active.days > 1 && (
+                <ol className="stages">
+                  {active.stages.map((stage) => (
+                    <li key={stage.day}>
+                      <span className="stage-day">Day {stage.day}</span>
+                      <span className="stage-figures">
+                        {Math.round(stage.km)} km · +{stage.ascentMetres} m ·{" "}
+                        {formatHours(stage.hours)}
+                      </span>
+                      <span className="stage-stop">
+                        {stage.day === active.days
+                          ? "arrive home"
+                          : stage.bailout
+                            ? `stop near ${stage.bailout.name} (${stage.bailout.detourKm.toFixed(1)} km off route — train home from there if you have had enough)`
+                            : "stop in open country, no station nearby"}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </>
       )}
