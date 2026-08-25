@@ -10,7 +10,9 @@ import { openMember } from "./archive.js";
 import { at, columnIndex, parseCsv } from "./csv.js";
 import { emptyCalendar } from "./calendar.js";
 import { diagnose, keepRoute, type RouteFilter, type RouteInfo } from "./routeFilter.js";
-import { parseTime } from "./time.js";
+import { keepStop, summariseKinds } from "./serviceKind.js";
+import { countServicesPerDate, plannableEnd } from "./coverage.js";
+import { formatDate, parseTime } from "./time.js";
 
 export interface LoadOptions {
   /** Path to the feed: a .zip, or a directory of already extracted .txt files. */
@@ -21,6 +23,12 @@ export interface LoadOptions {
   dropRoutePatterns: RegExp[];
   /** When set, restricts to these route_type values instead of "any rail type". */
   keepRouteTypes?: number[];
+  /**
+   * Stop point kinds to keep, e.g. "OCETrain TER". This is the filter that
+   * actually separates TER from TGV, Intercités and replacement coaches.
+   * Empty keeps everything.
+   */
+  keepStopKinds?: string[];
   /** Print the full route diagnostic, then continue. */
   explainRoutes?: boolean;
 }
@@ -244,6 +252,21 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     });
   });
 
+  const kindSummary = summariseKinds(allStops.keys());
+  const describeKinds = () =>
+    [...kindSummary]
+      .sort((a, b) => b[1] - a[1])
+      .map(([kind, count]) => `  ${String(count).padStart(6)}  ${kind}`)
+      .join("\n");
+
+  if (options.explainRoutes) {
+    console.log(`\nStop kinds in stops.txt (gtfs.keepStopKinds selects from these):`);
+    console.log(describeKinds());
+    console.log(
+      `\nKeeping: ${options.keepStopKinds?.length ? options.keepStopKinds.join(", ") : "(everything)"}\n`,
+    );
+  }
+
   // --- stop_times -----------------------------------------------------------
   const stops: Stop[] = [];
   const stopIndex = new Map<string, number>();
@@ -262,7 +285,9 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     return stops.length - 1;
   };
 
+  const keptKinds = new Set(options.keepStopKinds ?? []);
   let scanned = 0;
+  let skippedKind = 0;
   await readTable(zipPath, "stop_times.txt", (row, header) => {
     if (++scanned % 2_000_000 === 0) console.log(`  stop_times: ${scanned / 1e6}M rows scanned`);
     const [tripId, arrival, departure, stopId, sequence] = columnIndex(
@@ -275,26 +300,43 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     );
     const trip = trips.get(at(row, tripId!));
     if (!trip) return;
-    trip.stops.push(indexOfStop(at(row, stopId!)));
+    const stop = at(row, stopId!);
+    // Trips are homogeneous in stop kind, so dropping the rows also drops the
+    // trip: it ends up with too few stops to be usable and is discarded below.
+    if (!keepStop(stop, keptKinds)) {
+      skippedKind++;
+      return;
+    }
+    trip.stops.push(indexOfStop(stop));
     trip.arrivals.push(parseTime(at(row, arrival!)));
     trip.departures.push(parseTime(at(row, departure!)));
     trip.sequence.push(Number(at(row, sequence!)));
   });
-  console.log(`stop_times: ${scanned} rows scanned, ${stops.length} stops in use`);
+  console.log(
+    `stop_times: ${scanned} rows scanned, ${stops.length} stops in use` +
+      (skippedKind ? `, ${skippedKind} rows skipped by stop kind` : ""),
+  );
 
   // --- patterns -------------------------------------------------------------
   const patternsBySignature = new Map<string, Pattern>();
-  let dropped = 0;
+  let filteredOut = 0;
+  let malformed = 0;
   for (const [tripId, trip] of trips) {
+    if (trip.stops.length === 0) {
+      // Every stop was removed by the kind filter, i.e. this is not a service
+      // we are interested in. Expected, not a problem with the data.
+      filteredOut++;
+      continue;
+    }
     if (trip.stops.length < 2) {
-      dropped++;
+      malformed++;
       continue;
     }
     const order = trip.stops.map((_, i) => i).sort((a, b) => trip.sequence[a]! - trip.sequence[b]!);
     const orderedStops = order.map((i) => trip.stops[i]!);
     const times = buildTimes(order, trip);
     if (!times) {
-      dropped++;
+      malformed++;
       continue;
     }
 
@@ -341,8 +383,27 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
 
   console.log(
     `Patterns: ${patterns.length} over ${stops.length} stops` +
-      (dropped ? ` (${dropped} trips dropped as unusable)` : ""),
+      (filteredOut ? `, ${filteredOut} trips excluded by stop kind` : "") +
+      (malformed ? `, ${malformed} trips dropped as malformed` : ""),
   );
+
+  if (patterns.length === 0) {
+    throw new Error(
+      `No usable trips remain after filtering.\n\n` +
+        `gtfs.keepStopKinds is ${JSON.stringify(options.keepStopKinds ?? [])}, ` +
+        `but stops.txt contains:\n${describeKinds()}\n\n` +
+        `Set gtfs.keepStopKinds in config/home.json to one or more of the kinds above.`,
+    );
+  }
+
+  const servicesPerDate = countServicesPerDate(services.values(), feedStart, feedEnd);
+  const usableEnd = plannableEnd(servicesPerDate, feedEnd);
+  if (usableEnd < feedEnd) {
+    console.log(
+      `Feed declares dates to ${formatDate(feedEnd)}, but the timetable thins out ` +
+        `after ${formatDate(usableEnd)}; planning stops there.`,
+    );
+  }
 
   return {
     stops,
@@ -353,6 +414,8 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     services,
     feedStart,
     feedEnd,
+    plannableEnd: usableEnd,
+    servicesPerDate,
   };
 }
 

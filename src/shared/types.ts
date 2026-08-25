@@ -59,9 +59,20 @@ export interface TimetableIndex {
   /** stop index -> pattern ids that call there. */
   patternsAtStop: number[][];
   services: Map<string, ServiceCalendar>;
-  /** Feed coverage, from calendar/calendar_dates. */
+  /** Nominal coverage, from calendar/calendar_dates. */
   feedStart: ServiceDate;
   feedEnd: ServiceDate;
+  /**
+   * Last date with a real timetable rather than a handful of stub services.
+   *
+   * The SNCF feed declares dates months past the point where it stops being
+   * useful: the tail drops from ~2000 active services a day to one or two.
+   * Planning past this date silently returns nothing, so it is measured rather
+   * than taken from feed_end_date.
+   */
+  plannableEnd: ServiceDate;
+  /** Active service count per date, which is what plannableEnd is derived from. */
+  servicesPerDate: Map<ServiceDate, number>;
 }
 
 export interface Leg {

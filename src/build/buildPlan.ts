@@ -26,8 +26,12 @@ export interface PlanDestination {
     to: string;
     departure: string;
     arrival: string;
+    /** The line, e.g. "Lyon Perrache - Lyon Part Dieu - Roanne". */
     route: string;
-    headsign: string;
+    /** Where the train is going, when the feed says. Empty if it does not. */
+    towards: string;
+    /** The train number, when the feed puts one in trip_headsign. */
+    trainNumber: string;
   }>;
 }
 
@@ -67,10 +71,11 @@ export async function buildPlan(
   const home = resolveHome(index, config.home);
   console.log(`Home: ${home.name} (${home.stationId})`);
 
-  const dates = sampleDates(index.feedStart, index.feedEnd, config.dayType);
+  const dates = sampleDates(index.feedStart, index.plannableEnd, config.dayType);
   if (dates.length === 0) {
     throw new Error(
-      `The feed covers ${formatDate(index.feedStart)} to ${formatDate(index.feedEnd)}, ` +
+      `The feed is plannable from ${formatDate(index.feedStart)} to ` +
+        `${formatDate(index.plannableEnd)}, ` +
         `which contains no future ${config.dayType}.`,
     );
   }
@@ -168,7 +173,7 @@ export async function buildPlan(
     feed: {
       source: config.gtfs.url,
       start: formatDate(index.feedStart),
-      end: formatDate(index.feedEnd),
+      end: formatDate(index.plannableEnd),
     },
     settings: {
       arriveBy: formatTime(config.trip.arriveBy),
@@ -196,14 +201,21 @@ function toDestination(itinerary: Itinerary): PlanDestination {
     travel: formatDuration(itinerary.duration),
     travelMinutes: Math.round(itinerary.duration / 60),
     transfers: itinerary.transfers,
-    legs: itinerary.legs.map((leg) => ({
-      from: leg.fromName,
-      to: leg.toName,
-      departure: formatTime(leg.departure),
-      arrival: formatTime(leg.arrival),
-      route: leg.routeName,
-      headsign: leg.headsign,
-    })),
+    legs: itinerary.legs.map((leg) => {
+      // The SNCF feed puts the train number in trip_headsign rather than a
+      // destination, so a numeric value is labelled as such instead of
+      // being shown as "towards 886917".
+      const isTrainNumber = /^\d+$/.test(leg.headsign.trim());
+      return {
+        from: leg.fromName,
+        to: leg.toName,
+        departure: formatTime(leg.departure),
+        arrival: formatTime(leg.arrival),
+        route: leg.routeName,
+        towards: isTrainNumber ? "" : leg.headsign,
+        trainNumber: isTrainNumber ? leg.headsign.trim() : "",
+      };
+    }),
   };
 }
 

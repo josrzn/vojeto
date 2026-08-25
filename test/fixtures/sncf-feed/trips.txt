@@ -1,0 +1,6 @@
+route_id,service_id,trip_id,trip_headsign,direction_id,block_id,shape_id
+FR:Line::AAAA:,DAILY,TER_LYON,Lyon Part Dieu,0,1,
+FR:Line::BBBB:,DAILY,TER_STET,Saint-Étienne,0,2,
+FR:Line::CCCC:,DAILY,IC_NANTES,Nantes,0,3,
+FR:Line::DDDD:,DAILY,TGV_PARIS,Paris,0,4,
+FR:Line::EEEE:,DAILY,CAR_AMPLEPUIS,Amplepuis,0,5,

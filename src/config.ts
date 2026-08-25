@@ -18,6 +18,8 @@ export interface Config {
     dropRoutePatterns: RegExp[];
     /** Optional: restrict to these route_type values instead of "any rail type". */
     keepRouteTypes: number[] | undefined;
+    /** Stop point kinds to keep, e.g. "OCETrain TER". Empty keeps everything. */
+    keepStopKinds: string[];
   };
   map: { styleUrl: string };
   /** Which day of the week each month's sample date should fall on. */
@@ -33,6 +35,7 @@ interface RawConfig {
     keepRoutePatterns?: string[];
     dropRoutePatterns?: string[];
     keepRouteTypes?: number[];
+    keepStopKinds?: string[];
   };
   map?: { styleUrl?: string };
   dayType?: string;
@@ -79,9 +82,12 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
     },
     gtfs: {
       url: String(gtfs.url ?? ""),
-      keepRoutePatterns: (gtfs.keepRoutePatterns ?? ["\\bTER\\b"]).map((p) => new RegExp(p, "i")),
+      // Defaults to empty: this feed's route names carry no service type, so
+      // filtering is done on stop kinds instead.
+      keepRoutePatterns: (gtfs.keepRoutePatterns ?? []).map((p) => new RegExp(p, "i")),
       dropRoutePatterns: (gtfs.dropRoutePatterns ?? []).map((p) => new RegExp(p, "i")),
       keepRouteTypes: gtfs.keepRouteTypes?.map(Number),
+      keepStopKinds: gtfs.keepStopKinds ?? ["OCETrain TER"],
     },
     map: { styleUrl: String(raw.map?.styleUrl ?? "https://tiles.openfreemap.org/styles/liberty") },
     dayType: dayType as Config["dayType"],

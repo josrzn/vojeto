@@ -69,14 +69,16 @@ async function main(): Promise<void> {
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
         ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
+        keepStopKinds: config.gtfs.keepStopKinds,
         explainRoutes: flags.explainRoutes,
       });
 
       const home = resolveHome(index, config.home);
-      const dates = sampleDates(index.feedStart, index.feedEnd, config.dayType);
+      const dates = sampleDates(index.feedStart, index.plannableEnd, config.dayType);
       console.log(
-        `\nFeed covers ${formatDate(index.feedStart)} to ${formatDate(index.feedEnd)}` +
-          ` (${dates.length} plannable months)`,
+        `\nFeed declares ${formatDate(index.feedStart)} to ${formatDate(index.feedEnd)}; ` +
+          `plannable to ${formatDate(index.plannableEnd)}` +
+          ` (${dates.length} months)`,
       );
       console.log(`Home resolves to ${home.name} (${home.stationId})`);
       console.log(`Sample dates: ${dates.map((d) => d.date).map(formatDate).join(", ")}`);
@@ -92,6 +94,7 @@ async function main(): Promise<void> {
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
         ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
+        keepStopKinds: config.gtfs.keepStopKinds,
       });
       const matches = searchStations(index, query);
       if (matches.length === 0) console.log(`No station matches ${JSON.stringify(query)}`);
@@ -108,6 +111,7 @@ async function main(): Promise<void> {
         keepRoutePatterns: config.gtfs.keepRoutePatterns,
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
         ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
+        keepStopKinds: config.gtfs.keepStopKinds,
         explainRoutes: flags.explainRoutes,
       });
       if (flags.brouter) config.bike.brouterUrl = flags.brouter;

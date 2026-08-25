@@ -41,7 +41,8 @@ Everything personal lives in [`config/home.json`](config/home.json).
 | `bike.kmPerDay` | How far you actually want to ride in a day; sets where overnight stops fall. |
 | `bike.maxTotalKm` | Rides longer than this as the crow flies are not attempted. |
 | `bike.brouterUrl` | Point at `http://localhost:17777/brouter` to use your own BRouter. |
-| `gtfs.keepRouteTypes` | Optional. Restrict to specific `route_type` values (e.g. `[106]` for regional rail) instead of matching on names. |
+| `gtfs.keepStopKinds` | Which services to keep, e.g. `["OCETrain TER"]`. This is the filter that matters — see below. |
+| `gtfs.keepRouteTypes` | Optional. Restrict to specific `route_type` values. Rarely needed. |
 | `dayType` | `saturday`, `sunday` or `weekday` — which day each month's sample date lands on. |
 
 ### Moving house
@@ -50,10 +51,19 @@ Change `home.query`, re-run `npm run plan`. Nothing else is home-specific.
 
 ## What the numbers mean, and what they don't
 
-**The feed only reaches about five months ahead.** SNCF publishes roughly 151
-days of timetable, so "vary the month" means the next four or five months, not
-next July. `npm run ingest` prints the exact window. Re-run `plan` monthly and
-the horizon rolls forward.
+**The usable horizon is shorter than the feed claims.** The feed declares dates
+about five months out, but the timetable is only really populated for the first
+three to four. Past that it collapses to one or two stub services a day — a feed
+running to 2027-01-31 stopped being useful after 2026-12-12. Planning into that
+tail silently returns nothing, so `ingest` measures where the service count
+falls off and stops there, reporting both dates:
+
+```
+Feed declares 2026-08-24 to 2027-01-31; plannable to 2026-12-12 (5 months)
+```
+
+So "vary the month" means the next three or four months, not next July. Re-run
+`plan` monthly and the horizon rolls forward.
 
 **One sample date per month.** The plan uses the second Saturday of each month
 (or whatever `dayType` says). TER timetables shift a little through the year and
@@ -61,10 +71,11 @@ a lot on public holidays, so treat a listed train as "this service normally
 runs", not as a booking.
 
 **Bikes on trains are not in the data.** GTFS says nothing about bike spaces.
-The route filter keeps TER, where a non-folded bike normally travels free and
-unreserved subject to space — but that is a rule of thumb, not a guarantee, and
-it is why TGV and Intercités are filtered out by default: both require a paid
-reservation for a bike. Check before you rely on a specific train.
+The filter keeps `OCETrain TER`, where a non-folded bike normally travels free
+and unreserved subject to space — but that is a rule of thumb, not a guarantee.
+TGV, Intercités and OUIGO are excluded because all three require a paid bike
+reservation, and replacement coaches because they will not take a bike at all.
+Check before you rely on a specific train.
 
 **The ride home is a suggestion.** BRouter's `trekking` profile prefers quiet
 roads and cycle paths, but it does not know about seasonal closures, gravel, or
@@ -124,7 +135,7 @@ Useful flags (after `--`):
 
 | Path | Role |
 | --- | --- |
-| `src/gtfs/` | Download the feed, stream-parse the CSV, filter to TER, build a routable index of stop patterns. |
+| `src/gtfs/` | Download the feed, stream-parse the CSV, filter to TER by stop kind, measure the usable date range, build a routable index of stop patterns. |
 | `src/router/raptor.ts` | RAPTOR. Run once per morning departure from home, keeping the best journey per station that lands inside the arrival window. |
 | `src/bike/` | BRouter client (disk-cached) and the ride-home planner: day splits, ascent, bail-out stations. |
 | `src/build/` | Pick a date per month, run both halves, emit `public/data/plan.json`. |

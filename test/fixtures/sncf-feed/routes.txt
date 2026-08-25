@@ -1,0 +1,6 @@
+route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color
+FR:Line::AAAA:,1187,C12,Lyon Perrache - Lyon Part Dieu - Roanne,,2,,0749FF,FFFFFF
+FR:Line::BBBB:,1187,C30,Saint-Étienne - Roanne,,2,,0749FF,FFFFFF
+FR:Line::CCCC:,1187,121A,Nantes - Lyon,,2,,,FFFFFF
+FR:Line::DDDD:,1187,801B,Paris - Roanne TGV,,2,,,FFFFFF
+FR:Line::EEEE:,1187,C99,Roanne - Amplepuis par car,,3,,006600,FFFFFF

@@ -33,7 +33,9 @@ export function TripDetail({ home, destination, ride, onClose }: Props) {
               {leg.from} → {leg.to}
             </span>
             <span className="leg-route">
-              {leg.headsign ? `towards ${leg.headsign}` : leg.route}
+              {[leg.route, leg.towards && `towards ${leg.towards}`, leg.trainNumber && `train ${leg.trainNumber}`]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           </li>
         ))}
