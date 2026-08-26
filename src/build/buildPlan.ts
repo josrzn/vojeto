@@ -6,7 +6,7 @@ import { formatDate, formatDuration, formatTime } from "../gtfs/time.js";
 import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
-import { slug, toGpx } from "../bike/gpx.js";
+import { densify, slug, toGpx } from "../bike/gpx.js";
 import { maxRideKm } from "../bike/effort.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
@@ -263,7 +263,12 @@ export async function buildPlan(
       // more useful than it silently vanishing.
       rides[target.point.stationId] = await Promise.all(
         result.variants.map((variant) =>
-          exportVariant(variant, target.point.name, options.gpxDir),
+          exportVariant(
+            variant,
+            target.point.name,
+            options.gpxDir,
+            config.ride.gpxMaxPointSpacingMetres,
+          ),
         ),
       );
       const best = usable[0]!;
@@ -433,6 +438,7 @@ async function exportVariant(
   variant: RideVariant,
   stationName: string,
   gpxDir: string | undefined,
+  maxPointSpacingMetres: number,
 ): Promise<PlanRideVariant> {
   const { track, ...rest } = variant;
   if (!gpxDir || !variant.feasible || track.length < 2) {
@@ -450,7 +456,7 @@ async function exportVariant(
     toGpx({
       name: `${stationName} to home — ${variant.label}`,
       description: summary,
-      coordinates: track,
+      coordinates: densify(track, maxPointSpacingMetres),
       time: new Date().toISOString(),
       waypoints: variant.stages.slice(0, -1).map((stage) => ({
         lat: stage.end.lat,

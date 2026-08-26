@@ -49,6 +49,10 @@
       "$comment": "The continuous ride-time-home map. Costs one BRouter request per sample, so it is opt-in: run `npm run plan -- --field`. radiusKm 0 derives it from budgetHours.",
       "spacingKm": 20,
       "radiusKm": 0
+    },
+    "gpx": {
+      "$comment": "Inserts points into exported tracks so no step exceeds this, which keeps map-matching importers (Komoot, Garmin) happy over long straight roads. 0 disables.",
+      "maxPointSpacingMetres": 50
     }
   },
   "gtfs": {
