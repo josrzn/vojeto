@@ -7,6 +7,7 @@ import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
 import { densify, describeRide, slug, toGpx } from "../bike/gpx.js";
+import { compact, resampleByDistance, smoothElevation } from "../bike/profile.js";
 import { maxRideKm } from "../bike/effort.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
@@ -62,8 +63,19 @@ export interface PlanRejection {
   neededBudgetHours: number | null;
 }
 
-/** A variant as shipped to the browser: full track swapped for a .gpx name. */
-export type PlanRideVariant = Omit<RideVariant, "track"> & { gpx: string | null };
+/**
+ * A variant as shipped to the browser.
+ *
+ * The full track is replaced by two filenames: a .gpx to take away, and a
+ * compact resampled profile fetched only when the variant is looked at. Neither
+ * belongs in plan.json — together they would be several megabytes.
+ */
+export type PlanRideVariant = Omit<RideVariant, "track"> & {
+  gpx: string | null;
+  /** Filename of the resampled elevation profile. Not `profile`, which is the
+   *  BRouter profile this ride was routed with. */
+  elevationFile: string | null;
+};
 
 export interface Plan {
   generatedAt: string;
@@ -109,6 +121,8 @@ export interface Plan {
 export interface BuildOptions {
   /** Directory to write .gpx files into, alongside plan.json. */
   gpxDir?: string;
+  /** Directory to write resampled elevation profiles into. */
+  profileDir?: string;
   /** Only route the N nearest destinations. Useful for a quick first run. */
   limit?: number;
   /** Skip BRouter entirely and emit train results only. */
@@ -263,12 +277,7 @@ export async function buildPlan(
       // more useful than it silently vanishing.
       rides[target.point.stationId] = await Promise.all(
         result.variants.map((variant) =>
-          exportVariant(
-            variant,
-            target.point.name,
-            options.gpxDir,
-            config.ride.gpxMaxPointSpacingMetres,
-          ),
+          exportVariant(variant, target.point.name, config, options),
         ),
       );
       const best = usable[0]!;
@@ -431,26 +440,41 @@ function diagnose(
 /**
  * Writes a variant's .gpx and drops the full track from what ships.
  *
- * Only rides that fit get a file: the rest are shown so you can see why they
- * missed, not so you can follow them.
+ * Every routed variant gets a file, including ones that overrun the budget:
+ * the route exists and you may well want to ride it on a longer day, so there
+ * is no reason to withhold it.
  */
 async function exportVariant(
   variant: RideVariant,
   stationName: string,
-  gpxDir: string | undefined,
-  maxPointSpacingMetres: number,
+  config: Config,
+  options: BuildOptions,
 ): Promise<PlanRideVariant> {
   const { track, ...rest } = variant;
-  if (!gpxDir || !variant.feasible || track.length < 2) {
-    return { ...rest, gpx: null };
+  if (track.length < 2) return { ...rest, gpx: null, elevationFile: null };
+
+  const key = `${slug(stationName)}-${slug(variant.id)}`;
+  let profileFile: string | null = null;
+
+  if (options.profileDir) {
+    // Even spacing is the point: gradients taken between the router's own
+    // points would each cover a different distance and not be comparable.
+    const resampled = resampleByDistance(track, config.ride.profileStepMetres);
+    const smoothed = { ...resampled, points: smoothElevation(resampled.points, 3) };
+    profileFile = `${key}.json`;
+    await mkdir(options.profileDir, { recursive: true });
+    await writeFile(path.join(options.profileDir, profileFile), JSON.stringify(compact(smoothed)));
   }
 
-  const file = `${slug(stationName)}-${slug(variant.id)}.gpx`;
+  if (!options.gpxDir) return { ...rest, gpx: null, elevationFile: profileFile };
+
+  const maxPointSpacingMetres = config.ride.gpxMaxPointSpacingMetres;
+  const file = `${key}.gpx`;
   const summary = describeRide(variant);
 
-  await mkdir(gpxDir, { recursive: true });
+  await mkdir(options.gpxDir, { recursive: true });
   await writeFile(
-    path.join(gpxDir, file),
+    path.join(options.gpxDir, file),
     toGpx({
       name: `${stationName} to home — ${variant.label}`,
       description: summary,
@@ -467,7 +491,7 @@ async function exportVariant(
     }),
   );
 
-  return { ...rest, gpx: file };
+  return { ...rest, gpx: file, elevationFile: profileFile };
 }
 
 function toDestination(itinerary: Itinerary): PlanDestination {

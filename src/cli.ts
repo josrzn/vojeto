@@ -14,6 +14,7 @@ const FEED_FILE = path.join(DATA_DIR, "sncf-gtfs.zip");
 const CACHE_DIR = path.join(DATA_DIR, "brouter-cache");
 const PLAN_FILE = path.join("public", "data", "plan.json");
 const GPX_DIR = path.join("public", "data", "gpx");
+const PROFILE_DIR = path.join("public", "data", "profiles");
 
 interface Flags {
   command: string;
@@ -166,6 +167,7 @@ async function main(): Promise<void> {
       const plan = await buildPlan(index, config, {
         cacheDir: CACHE_DIR,
         gpxDir: GPX_DIR,
+        profileDir: PROFILE_DIR,
         skipBike: flags.skipBike,
         field,
         ...(flags.limit !== undefined ? { limit: flags.limit } : {}),

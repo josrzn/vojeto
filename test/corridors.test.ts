@@ -42,7 +42,8 @@ const variant = (km: number, feasible = true, id = "trekking"): PlanRideVariant 
   neededBudgetHours: feasible ? null : 9,
   stages: [],
   geometry: [],
-  gpx: feasible ? "test.gpx" : null,
+  gpx: "test.gpx",
+  elevationFile: "test.json",
 });
 
 describe("bestVariant", () => {

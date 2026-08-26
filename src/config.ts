@@ -27,6 +27,8 @@ export interface Config {
     brouterUrl: string;
     field: { spacingKm: number; radiusKm: number };
     gpxMaxPointSpacingMetres: number;
+    /** Spacing of the resampled elevation profile shipped to the browser. */
+    profileStepMetres: number;
   };
   gtfs: {
     url: string;
@@ -134,6 +136,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
       alternatives: Math.max(1, num(ride["alternatives"], 1)),
       brouterUrl: String(ride["brouterUrl"] ?? "https://brouter.de/brouter"),
       field: parseField(ride["field"], budgetHours, num(ride["speedKmh"], 16)),
+      profileStepMetres: Math.max(10, num(ride["profileStepMetres"], 100)),
       gpxMaxPointSpacingMetres: Math.max(
         0,
         num((ride["gpx"] as Record<string, unknown> | undefined)?.["maxPointSpacingMetres"], 50),

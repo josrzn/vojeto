@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Plan } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
+import type { LoadedProfile } from "./grade.js";
+import { haversine } from "../../src/shared/geo.js";
 import { TripDetail } from "./TripDetail.js";
 import {
   bestVariant,
@@ -42,6 +44,8 @@ export function App() {
   const [showField, setShowField] = useState(true);
   const [showNoTrain, setShowNoTrain] = useState(false);
   const [showFrontier, setShowFrontier] = useState(false);
+  const [profile, setProfile] = useState<LoadedProfile | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +69,48 @@ export function App() {
   }, []);
 
   const plan = load.status === "ready" ? load.plan : null;
+
+  // Elevation is fetched per variant rather than shipped in plan.json: at ~10 KB
+  // each, all of them together would be several megabytes for data you only look
+  // at one variant at a time.
+  const elevationFile =
+    plan && selected
+      ? ((plan.rides[selected] ?? []).find((v) => v.id === variantId) ??
+          (plan.rides[selected] ?? []).find((v) => v.feasible) ??
+          (plan.rides[selected] ?? [])[0])?.elevationFile ?? null
+      : null;
+
+  useEffect(() => {
+    if (!elevationFile) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`./data/profiles/${elevationFile}`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((raw: { step: number; points: number[][] }) => {
+        if (cancelled) return;
+        const km: number[] = [0];
+        for (let i = 1; i < raw.points.length; i++) {
+          const p = raw.points[i - 1]!;
+          const q = raw.points[i]!;
+          km.push(km[i - 1]! + haversine({ lon: p[0]!, lat: p[1]! }, { lon: q[0]!, lat: q[1]! }) / 1000);
+        }
+        const ele = raw.points.map((p) => p[2] ?? 0);
+        const grade: number[] = [0];
+        for (let i = 1; i < raw.points.length; i++) {
+          const run = (km[i]! - km[i - 1]!) * 1000;
+          grade.push(run > 0 ? ((ele[i]! - ele[i - 1]!) / run) * 100 : 0);
+        }
+        setProfile({ km, ele, grade, at: raw.points.map((p) => [p[0]!, p[1]!]) });
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [elevationFile]);
   const month = useMemo(
     () => plan?.months.find((m) => m.key === monthKey) ?? plan?.months[0] ?? null,
     [plan, monthKey],
@@ -266,6 +312,8 @@ export function App() {
           }
           showField={showField && load.plan.field !== null}
           showNoTrain={showNoTrain}
+          profile={profile}
+          hoverIndex={hoverIndex}
           onSelect={(id) => {
             setSelected(id);
             setVariantId(null);
@@ -281,7 +329,7 @@ export function App() {
               calls at
             </li>
             <li>
-              <span className="swatch swatch-ride" /> ride home
+              <span className="swatch swatch-ride" /> ride home, shaded by gradient
             </li>
             <li>
               <span className="swatch swatch-dot" /> station with a morning train
@@ -341,6 +389,8 @@ export function App() {
             destination={chosen}
             variants={variants}
             active={activeVariant}
+            profile={profile}
+            onHoverProfile={setHoverIndex}
             onPickVariant={setVariantId}
             onClose={() => setSelected(null)}
           />

@@ -1,16 +1,28 @@
 import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 import { formatHours } from "./corridors.js";
+import { ElevationProfile } from "./ElevationProfile.js";
+import type { LoadedProfile } from "./grade.js";
 
 interface Props {
   destination: PlanDestination;
   variants: PlanRideVariant[];
   active: PlanRideVariant | null;
+  profile: LoadedProfile | null;
+  onHoverProfile: (index: number | null) => void;
   onPickVariant: (id: string) => void;
   onClose: () => void;
 }
 
-export function TripDetail({ destination, variants, active, onPickVariant, onClose }: Props) {
+export function TripDetail({
+  destination,
+  variants,
+  active,
+  profile,
+  onHoverProfile,
+  onPickVariant,
+  onClose,
+}: Props) {
   return (
     <section className="detail">
       <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
@@ -95,6 +107,7 @@ export function TripDetail({ destination, variants, active, onPickVariant, onClo
                 {formatHours(active.hours)} riding
                 {active.days > 1 && ` · ${active.days} days`}
               </p>
+              {profile && <ElevationProfile profile={profile} onHover={onHoverProfile} />}
               {active.gpx && (
                 <p className="detail-export">
                   <a href={`./data/gpx/${active.gpx}`} download>

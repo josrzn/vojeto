@@ -8,6 +8,7 @@ import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 import { contourFeatures } from "../../src/bike/contour.js";
+import { GRADE_COLORS, gradeBand, type LoadedProfile } from "./grade.js";
 
 interface Props {
   plan: Plan;
@@ -22,6 +23,10 @@ interface Props {
   frontierHours: number | null;
   showField: boolean;
   showNoTrain: boolean;
+  /** Elevation samples for the shown ride, once fetched. */
+  profile: LoadedProfile | null;
+  /** Sample the reader is hovering in the profile chart, echoed on the map. */
+  hoverIndex: number | null;
   onSelect: (stationId: string | null) => void;
 }
 
@@ -29,6 +34,7 @@ const FIELD_SOURCE = "ride-field";
 const TRAIN_SOURCE = "train";
 const NOTRAIN_SOURCE = "no-train";
 const FRONTIER_SOURCE = "frontier";
+const HOVER_SOURCE = "route-hover";
 const STATIONS_SOURCE = "stations";
 const ROUTE_SOURCE = "route";
 const STAGES_SOURCE = "stages";
@@ -41,6 +47,8 @@ export function MapView({
   frontierHours,
   showField,
   showNoTrain,
+  profile,
+  hoverIndex,
   onSelect,
 }: Props) {
   // Contours are derived in the browser rather than baked into plan.json, so
@@ -123,6 +131,7 @@ export function MapView({
         instance.addSource(TRAIN_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(NOTRAIN_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(ROUTE_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(HOVER_SOURCE, { type: "geojson", data: emptyCollection() });
 
         // Drawn first, so the field stays a backdrop and never competes with
         // the stations, which are the only places you can actually start.
@@ -180,9 +189,11 @@ export function MapView({
           source: TRAIN_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": "#1d3557",
+            // Orange, not navy: the grade ramp owns blue on this map, and a
+            // navy train line beside a dark-blue steep pitch reads as one thing.
+            "line-color": "#eb6834",
             "line-width": 3,
-            "line-opacity": 0.85,
+            "line-opacity": 0.9,
           },
         });
         instance.addLayer({
@@ -193,7 +204,7 @@ export function MapView({
           paint: {
             "circle-radius": 7,
             "circle-color": "#ffffff",
-            "circle-stroke-color": "#1d3557",
+            "circle-stroke-color": "#eb6834",
             "circle-stroke-width": 3,
           },
         });
@@ -204,7 +215,7 @@ export function MapView({
           filter: ["all", ["==", ["geometry-type"], "Point"], ["!=", ["get", "change"], true]],
           paint: {
             "circle-radius": 3,
-            "circle-color": "#1d3557",
+            "circle-color": "#eb6834",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 1.5,
           },
@@ -222,7 +233,22 @@ export function MapView({
           type: "line",
           source: ROUTE_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#d1495b", "line-width": 3.5 },
+          paint: {
+            // Falls back to the ride's own colour until the elevation arrives.
+            "line-color": ["coalesce", ["get", "color"], "#d1495b"],
+            "line-width": 3.5,
+          },
+        });
+        instance.addLayer({
+          id: "route-hover",
+          type: "circle",
+          source: HOVER_SOURCE,
+          paint: {
+            "circle-radius": 6,
+            "circle-color": "#0d366b",
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2.5,
+          },
         });
 
         instance.addLayer({
@@ -479,6 +505,19 @@ export function MapView({
     });
   }, [ready, selectedLegs]);
 
+  // Where the reader is pointing in the elevation chart.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const source = instance.getSource(HOVER_SOURCE) as GeoJSONSource | undefined;
+    if (!source) return;
+    const at = hoverIndex === null ? null : profile?.at[hoverIndex];
+    source.setData({
+      type: "FeatureCollection",
+      features: at ? [point(at[0]!, at[1]!, {})] : [],
+    });
+  }, [ready, profile, hoverIndex]);
+
   // The ride home for whichever destination is selected.
   useEffect(() => {
     const instance = map.current;
@@ -496,16 +535,35 @@ export function MapView({
         return;
       }
 
-      routeSource.setData({
-        type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            properties: {},
-            geometry: { type: "LineString", coordinates: ride.geometry },
-          },
-        ],
-      });
+      routeSource.setData(
+        profile
+          ? {
+              type: "FeatureCollection",
+              // One feature per band rather than per segment: five multi-line
+              // features instead of several hundred single ones.
+              features: GRADE_COLORS.map((color, band) => ({
+                type: "Feature" as const,
+                properties: { color, band },
+                geometry: {
+                  type: "MultiLineString" as const,
+                  coordinates: profile.at
+                    .slice(1)
+                    .map((point, i) => [profile.at[i]!, point])
+                    .filter((_, i) => gradeBand(profile.grade[i + 1] ?? 0) === band),
+                },
+              })).filter((f) => f.geometry.coordinates.length > 0),
+            }
+          : {
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  properties: {},
+                  geometry: { type: "LineString", coordinates: ride.geometry },
+                },
+              ],
+            },
+      );
 
       stagesSource.setData({
         type: "FeatureCollection",
@@ -535,7 +593,7 @@ export function MapView({
     };
 
     paint();
-  }, [ready, variant]);
+  }, [ready, variant, profile]);
 
   return <div className="map" ref={container} />;
 }

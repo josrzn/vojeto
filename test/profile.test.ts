@@ -1,0 +1,151 @@
+import { describe, expect, it } from "vitest";
+import {
+  compact,
+  gradeBand,
+  grades,
+  resampleByDistance,
+  smoothElevation,
+} from "../src/bike/profile.js";
+import { haversine } from "../src/shared/geo.js";
+
+/** A straight run north, climbing steadily: about 2.2 km, 200 m to 300 m. */
+const climb = [
+  [4.0, 46.0, 200],
+  [4.0, 46.01, 250],
+  [4.0, 46.02, 300],
+];
+
+describe("resampleByDistance", () => {
+  it("spaces samples evenly along the track", () => {
+    const { points } = resampleByDistance(climb, 100);
+    for (let i = 1; i < points.length - 1; i++) {
+      const step = haversine(
+        { lon: points[i - 1]![0]!, lat: points[i - 1]![1]! },
+        { lon: points[i]![0]!, lat: points[i]![1]! },
+      );
+      expect(step).toBeCloseTo(100, 0);
+    }
+  });
+
+  it("keeps the first and last point exactly", () => {
+    const { points } = resampleByDistance(climb, 100);
+    expect(points[0]).toEqual(climb[0]);
+    expect(points.at(-1)).toEqual(climb.at(-1));
+  });
+
+  it("interpolates elevation between the source points", () => {
+    const { points } = resampleByDistance(climb, 100);
+    // Elevation rises monotonically because the source does.
+    for (let i = 1; i < points.length; i++) {
+      expect(points[i]![2]!).toBeGreaterThanOrEqual(points[i - 1]![2]! - 1e-9);
+    }
+    expect(points.at(-1)![2]).toBe(300);
+  });
+
+  it("preserves the overall length", () => {
+    const { points } = resampleByDistance(climb, 100);
+    let resampled = 0;
+    for (let i = 1; i < points.length; i++) {
+      resampled += haversine(
+        { lon: points[i - 1]![0]!, lat: points[i - 1]![1]! },
+        { lon: points[i]![0]!, lat: points[i]![1]! },
+      );
+    }
+    let original = 0;
+    for (let i = 1; i < climb.length; i++) {
+      original += haversine(
+        { lon: climb[i - 1]![0]!, lat: climb[i - 1]![1]! },
+        { lon: climb[i]![0]!, lat: climb[i]![1]! },
+      );
+    }
+    expect(resampled).toBeCloseTo(original, 0);
+  });
+
+  it("passes through degenerate input", () => {
+    expect(resampleByDistance([], 100).points).toEqual([]);
+    expect(resampleByDistance([[4, 46, 1]], 100).points).toEqual([[4, 46, 1]]);
+    expect(resampleByDistance(climb, 0).points).toEqual(climb);
+  });
+});
+
+describe("gradeBand", () => {
+  it("puts flat and downhill in the recessive band", () => {
+    expect(gradeBand(-12)).toBe(0);
+    expect(gradeBand(0)).toBe(0);
+    expect(gradeBand(0.9)).toBe(0);
+  });
+
+  it("steps up with steepness", () => {
+    expect(gradeBand(1)).toBe(1);
+    expect(gradeBand(2.9)).toBe(1);
+    expect(gradeBand(3)).toBe(2);
+    expect(gradeBand(6)).toBe(3);
+    expect(gradeBand(9)).toBe(4);
+    expect(gradeBand(20)).toBe(4);
+  });
+
+  it("never skips a band as the gradient rises", () => {
+    let previous = 0;
+    for (let g = -5; g <= 15; g += 0.25) {
+      const band = gradeBand(g);
+      expect(band - previous).toBeLessThanOrEqual(1);
+      expect(band).toBeGreaterThanOrEqual(previous);
+      previous = band;
+    }
+  });
+});
+
+describe("grades", () => {
+  it("measures a steady climb", () => {
+    // 100 m up over 2.2 km is a shade over 4.5%.
+    const profile = resampleByDistance(climb, 100);
+    const all = grades(profile).slice(1);
+    for (const g of all) expect(g).toBeCloseTo(4.5, 0);
+  });
+
+  it("reports descent as negative", () => {
+    const descent = [...climb].reverse();
+    const all = grades(resampleByDistance(descent, 100)).slice(1);
+    for (const g of all) expect(g).toBeLessThan(0);
+  });
+
+  it("starts at zero, having nothing to compare against", () => {
+    expect(grades(resampleByDistance(climb, 100))[0]).toBe(0);
+  });
+});
+
+describe("smoothElevation", () => {
+  it("damps a single-point spike without moving the position", () => {
+    const spiky = [
+      [4.0, 46.0, 200],
+      [4.0, 46.001, 260], // a 60 m spike the elevation model invented
+      [4.0, 46.002, 200],
+    ];
+    const smoothed = smoothElevation(spiky, 3);
+    expect(smoothed[1]![2]!).toBeLessThan(260);
+    expect(smoothed[1]![0]).toBe(4.0);
+    expect(smoothed[1]![1]).toBe(46.001);
+  });
+
+  it("leaves a steady climb essentially alone", () => {
+    const steady = [
+      [4.0, 46.0, 100],
+      [4.0, 46.001, 110],
+      [4.0, 46.002, 120],
+      [4.0, 46.003, 130],
+      [4.0, 46.004, 140],
+    ];
+    expect(smoothElevation(steady, 3)[2]![2]).toBeCloseTo(120, 6);
+  });
+
+  it("does nothing for a window of one", () => {
+    expect(smoothElevation(climb, 1)).toEqual(climb);
+  });
+});
+
+describe("compact", () => {
+  it("rounds to about a metre of position and whole metres of height", () => {
+    const { points } = compact({ step: 100, points: [[4.123456789, 46.987654321, 210.4]] });
+    expect(points[0]).toEqual([4.12346, 46.98765, 210]);
+  });
+});
