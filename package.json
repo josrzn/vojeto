@@ -10,7 +10,7 @@
     "stations": "tsx src/cli.ts stations",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "preview": "vite build && vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -22,6 +22,11 @@ npm run plan        # build public/data/plan.json
 npm run dev         # http://localhost:5173
 ```
 
+`npm run plan` writes into `public/`, which `npm run dev` serves live. A built
+site only picks it up when it is rebuilt, so `npm run preview` rebuilds first.
+The footer shows when the plan you are looking at was generated: if that is
+older than your last run, you are looking at a stale page.
+
 `ingest` is worth running on its own the first time: it prints which services the
 filter kept, which station your home resolved to, where the ride home ends, and
 which dates it will plan for. `plan` then does the real work — one BRouter

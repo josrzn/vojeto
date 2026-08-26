@@ -10,6 +10,23 @@ import {
   groupIntoCorridors,
 } from "./corridors.js";
 
+/**
+ * How long ago the plan was generated.
+ *
+ * Shown because `npm run plan` writes into public/, which a built site only
+ * picks up when it is rebuilt: a page that looks wrong is usually a page
+ * showing an older plan than the one you just made.
+ */
+function describeAge(generatedAt: string): string {
+  const minutes = Math.round((Date.now() - new Date(generatedAt).getTime()) / 60000);
+  if (!Number.isFinite(minutes)) return "at an unknown time";
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
 type Load =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -231,6 +248,8 @@ export function App() {
         <footer className="colophon">
           Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at {settings.speedKmh} km/h
           plus {settings.climbMetresPerHour} m climb an hour.
+          {" "}Plan built {describeAge(load.plan.generatedAt)}
+          {load.plan.field ? " with a ride-time field." : ", no ride-time field."}
         </footer>
       </aside>
 
