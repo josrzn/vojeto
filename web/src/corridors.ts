@@ -1,5 +1,4 @@
-import type { PlanDestination } from "../../src/build/buildPlan.js";
-import type { RideVariant } from "../../src/bike/returnRoute.js";
+import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 export interface Corridor {
   name: string;
@@ -12,7 +11,7 @@ export interface Corridor {
 }
 
 /** The variant a station is best represented by: the quickest one that fits. */
-export function bestVariant(variants: RideVariant[] | undefined): RideVariant | null {
+export function bestVariant(variants: PlanRideVariant[] | undefined): PlanRideVariant | null {
   if (!variants?.length) return null;
   return variants.find((v) => v.feasible) ?? variants[0]!;
 }
@@ -26,7 +25,7 @@ export function bestVariant(variants: RideVariant[] | undefined): RideVariant | 
  */
 export function groupIntoCorridors(
   destinations: PlanDestination[],
-  rides: Record<string, RideVariant[]>,
+  rides: Record<string, PlanRideVariant[]>,
 ): Corridor[] {
   const groups = new Map<string, PlanDestination[]>();
   for (const destination of destinations) {

@@ -5,8 +5,7 @@ import {
   formatHoursCeil,
   groupIntoCorridors,
 } from "../web/src/corridors.js";
-import type { PlanDestination } from "../src/build/buildPlan.js";
-import type { RideVariant } from "../src/bike/returnRoute.js";
+import type { PlanDestination, PlanRideVariant } from "../src/build/buildPlan.js";
 
 const destination = (
   name: string,
@@ -27,7 +26,7 @@ const destination = (
   corridor,
 });
 
-const variant = (km: number, feasible = true, id = "trekking"): RideVariant => ({
+const variant = (km: number, feasible = true, id = "trekking"): PlanRideVariant => ({
   id,
   label: "Quiet roads",
   profile: "trekking",
@@ -43,6 +42,7 @@ const variant = (km: number, feasible = true, id = "trekking"): RideVariant => (
   neededBudgetHours: feasible ? null : 9,
   stages: [],
   geometry: [],
+  gpx: feasible ? "test.gpx" : null,
 });
 
 describe("bestVariant", () => {
@@ -68,7 +68,7 @@ describe("groupIntoCorridors", () => {
     destination("L'Arbresle", "Lyon line", 47),
     destination("Feurs", "Saint-Étienne line", 33),
   ];
-  const rides: Record<string, RideVariant[]> = {
+  const rides: Record<string, PlanRideVariant[]> = {
     Tarare: [variant(35)],
     Amplepuis: [variant(26)],
     "L'Arbresle": [variant(49)],

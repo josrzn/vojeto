@@ -6,6 +6,7 @@ import { formatDate, formatDuration, formatTime } from "../gtfs/time.js";
 import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
+import { slug, toGpx } from "../bike/gpx.js";
 import { maxRideKm } from "../bike/effort.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
@@ -61,6 +62,9 @@ export interface PlanRejection {
   neededBudgetHours: number | null;
 }
 
+/** A variant as shipped to the browser: full track swapped for a .gpx name. */
+export type PlanRideVariant = Omit<RideVariant, "track"> & { gpx: string | null };
+
 export interface Plan {
   generatedAt: string;
   home: { station: StationMatch; rideTo: Point };
@@ -81,7 +85,7 @@ export interface Plan {
   };
   months: Array<{ key: string; label: string; date: string; destinations: PlanDestination[] }>;
   /** Keyed by station id and shared across months: the ride home never changes. */
-  rides: Record<string, RideVariant[]>;
+  rides: Record<string, PlanRideVariant[]>;
   /** Stations reached by train but with no ride home that fits the budget. */
   rejected: PlanRejection[];
   /**
@@ -103,6 +107,8 @@ export interface Plan {
 }
 
 export interface BuildOptions {
+  /** Directory to write .gpx files into, alongside plan.json. */
+  gpxDir?: string;
   /** Only route the N nearest destinations. Useful for a quick first run. */
   limit?: number;
   /** Skip BRouter entirely and emit train results only. */
@@ -203,7 +209,7 @@ export async function buildPlan(
   );
   const targets = options.limit ? ordered.slice(0, options.limit) : ordered;
 
-  const rides: Record<string, RideVariant[]> = {};
+  const rides: Record<string, PlanRideVariant[]> = {};
   const rejected: Plan["rejected"] = [];
 
   if (!options.skipBike) {
@@ -255,7 +261,11 @@ export async function buildPlan(
 
       // Keep the unusable ones too: seeing why a station just missed out is
       // more useful than it silently vanishing.
-      rides[target.point.stationId] = result.variants;
+      rides[target.point.stationId] = await Promise.all(
+        result.variants.map((variant) =>
+          exportVariant(variant, target.point.name, options.gpxDir),
+        ),
+      );
       const best = usable[0]!;
       console.log(
         `  [${done}/${targets.length}] ${target.point.name}: ` +
@@ -411,6 +421,49 @@ function diagnose(
     hours: closest.hours,
     neededBudgetHours: closest.neededBudgetHours,
   };
+}
+
+/**
+ * Writes a variant's .gpx and drops the full track from what ships.
+ *
+ * Only rides that fit get a file: the rest are shown so you can see why they
+ * missed, not so you can follow them.
+ */
+async function exportVariant(
+  variant: RideVariant,
+  stationName: string,
+  gpxDir: string | undefined,
+): Promise<PlanRideVariant> {
+  const { track, ...rest } = variant;
+  if (!gpxDir || !variant.feasible || track.length < 2) {
+    return { ...rest, gpx: null };
+  }
+
+  const file = `${slug(stationName)}-${slug(variant.id)}.gpx`;
+  const summary =
+    `${variant.km.toFixed(0)} km, ${variant.ascentMetres} m of climbing, ` +
+    `about ${variant.hours.toFixed(1)} h riding via ${variant.profile}`;
+
+  await mkdir(gpxDir, { recursive: true });
+  await writeFile(
+    path.join(gpxDir, file),
+    toGpx({
+      name: `${stationName} to home — ${variant.label}`,
+      description: summary,
+      coordinates: track,
+      time: new Date().toISOString(),
+      waypoints: variant.stages.slice(0, -1).map((stage) => ({
+        lat: stage.end.lat,
+        lon: stage.end.lon,
+        name: `Night ${stage.day}`,
+        ...(stage.bailout
+          ? { description: `${stage.bailout.detourKm.toFixed(1)} km from ${stage.bailout.name} station` }
+          : {}),
+      })),
+    }),
+  );
+
+  return { ...rest, gpx: file };
 }
 
 function toDestination(itinerary: Itinerary): PlanDestination {

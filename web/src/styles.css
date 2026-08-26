@@ -173,6 +173,18 @@ code {
 .variant-label { font-size: 0.78rem; font-weight: 600; }
 .variant-figures { font-size: 0.72rem; color: var(--ink-soft); }
 
+.detail-export {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+}
+.detail-export a {
+  color: var(--rail);
+  font-weight: 600;
+  text-decoration: none;
+}
+.detail-export a:hover { text-decoration: underline; }
+.detail-export span { color: #93a1b0; font-size: 0.72rem; }
+
 .detail-slack { margin: 0.2rem 0 0; font-size: 0.78rem; color: #4c8577; }
 .detail-note { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--bike); }
 

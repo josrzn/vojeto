@@ -41,6 +41,7 @@ export function App() {
   const [showMisses, setShowMisses] = useState(false);
   const [showField, setShowField] = useState(true);
   const [showNoTrain, setShowNoTrain] = useState(false);
+  const [showFrontier, setShowFrontier] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,7 +262,7 @@ export function App() {
           selected={selected}
           variant={activeVariant}
           frontierHours={
-            chosen ? settings.budgetHours - chosen.travelMinutes / 60 : null
+            showFrontier && chosen ? settings.budgetHours - chosen.travelMinutes / 60 : null
           }
           showField={showField && load.plan.field !== null}
           showNoTrain={showNoTrain}
@@ -293,8 +294,8 @@ export function App() {
                     checked={showNoTrain}
                     onChange={(e) => setShowNoTrain(e.target.checked)}
                   />
-                  <span className="swatch swatch-hollow" /> station with no morning train
-                  ({load.plan.noTrain.length})
+                  <span className="swatch swatch-hollow" /> station with no morning train (
+                  {load.plan.noTrain.length})
                 </label>
               </li>
             )}
@@ -311,28 +312,39 @@ export function App() {
                 </label>
               </li>
             )}
+            {load.plan.field && showField && (
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showFrontier}
+                    onChange={(e) => setShowFrontier(e.target.checked)}
+                  />
+                  <span className="swatch swatch-dash" /> how far else you could have gone
+                </label>
+              </li>
+            )}
           </ul>
 
-          {load.plan.field && showField && (
+          {chosen && activeVariant && (
             <p className="key-note">
-              {chosen && activeVariant ? (
-                <>
-                  <span className="swatch swatch-dash" /> <strong>your limit today</strong>:{" "}
-                  {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} of riding
-                  left after the train to {chosen.name}. The ride is{" "}
-                  {formatHours(activeVariant.hours)}, so {chosen.name} falls{" "}
-                  {activeVariant.feasible ? "inside" : "outside"} it.
-                </>
-              ) : (
-                <>
-                  Pick a station and a dashed line appears: the riding you would have left
-                  after that train, so you can see what else was in reach.
-                </>
-              )}
+              <strong>{chosen.name}</strong>: {formatHours(chosen.travelMinutes / 60)} on the
+              train leaves {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} for
+              riding. This way home is {formatHours(activeVariant.hours)}, so it fits with{" "}
+              {formatHours(Math.max(0, activeVariant.slackHours))} spare.
             </p>
           )}
         </div>
 
+        {chosen && (
+          <TripDetail
+            destination={chosen}
+            variants={variants}
+            active={activeVariant}
+            onPickVariant={setVariantId}
+            onClose={() => setSelected(null)}
+          />
+        )}
       </main>
     </div>
   );

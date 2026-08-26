@@ -5,8 +5,8 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
-import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
-import type { RideVariant } from "../../src/bike/returnRoute.js";
+import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+
 import { contourFeatures } from "../../src/bike/contour.js";
 
 interface Props {
@@ -14,7 +14,7 @@ interface Props {
   destinations: PlanDestination[];
   selected: string | null;
   /** The way home currently being shown, or null when nothing is selected. */
-  variant: RideVariant | null;
+  variant: PlanRideVariant | null;
   /**
    * Riding hours left after the selected station's train, i.e. the contour of
    * the ride field that is that station's personal frontier.
@@ -186,10 +186,22 @@ export function MapView({
           },
         });
         instance.addLayer({
+          id: "train-change",
+          type: "circle",
+          source: TRAIN_SOURCE,
+          filter: ["==", ["get", "change"], true],
+          paint: {
+            "circle-radius": 7,
+            "circle-color": "#ffffff",
+            "circle-stroke-color": "#1d3557",
+            "circle-stroke-width": 3,
+          },
+        });
+        instance.addLayer({
           id: "train-calls",
           type: "circle",
           source: TRAIN_SOURCE,
-          filter: ["==", ["geometry-type"], "Point"],
+          filter: ["all", ["==", ["geometry-type"], "Point"], ["!=", ["get", "change"], true]],
           paint: {
             "circle-radius": 3,
             "circle-color": "#1d3557",
@@ -260,6 +272,20 @@ export function MapView({
               "text-halo-color": "#ffffff",
               "text-halo-width": 1.6,
             },
+          });
+          instance.addLayer({
+            id: "train-change-labels",
+            type: "symbol",
+            source: TRAIN_SOURCE,
+            filter: ["==", ["get", "change"], true],
+            layout: {
+              "text-field": ["get", "label"],
+              "text-size": 11,
+              "text-offset": [0, -1.4],
+              "text-anchor": "bottom",
+              "text-allow-overlap": true,
+            },
+            paint: { "text-color": "#1d3557", "text-halo-color": "#ffffff", "text-halo-width": 1.8 },
           });
           instance.addLayer({
             id: "stage-labels",
@@ -438,8 +464,16 @@ export function MapView({
             properties: {},
             geometry: { type: "LineString" as const, coordinates: leg.path },
           })),
-        ...legs.flatMap((leg) =>
-          leg.path.map((c) => point(c[0]!, c[1]!, {})),
+        // Where one leg ends and the next begins: the change, which is the one
+        // stop on the journey you actually have to do something at.
+        ...legs.flatMap((leg, i) =>
+          leg.path.map((c, j) => {
+            const isChange = i > 0 && j === 0;
+            return point(c[0]!, c[1]!, {
+              change: isChange,
+              ...(isChange ? { label: `change · ${leg.waitMinutes} min` } : {}),
+            });
+          }),
         ),
       ],
     });

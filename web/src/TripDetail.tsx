@@ -1,11 +1,11 @@
-import type { PlanDestination } from "../../src/build/buildPlan.js";
-import type { RideVariant } from "../../src/bike/returnRoute.js";
+import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+
 import { formatHours } from "./corridors.js";
 
 interface Props {
   destination: PlanDestination;
-  variants: RideVariant[];
-  active: RideVariant | null;
+  variants: PlanRideVariant[];
+  active: PlanRideVariant | null;
   onPickVariant: (id: string) => void;
   onClose: () => void;
 }
@@ -95,6 +95,14 @@ export function TripDetail({ destination, variants, active, onPickVariant, onClo
                 {formatHours(active.hours)} riding
                 {active.days > 1 && ` · ${active.days} days`}
               </p>
+              {active.gpx && (
+                <p className="detail-export">
+                  <a href={`./data/gpx/${active.gpx}`} download>
+                    ↓ Download GPX
+                  </a>{" "}
+                  <span>full resolution, with elevation</span>
+                </p>
+              )}
               <p className={active.feasible ? "detail-slack" : "detail-note"}>
                 {active.feasible
                   ? `${formatHours(Math.max(0, active.slackHours))} to spare`

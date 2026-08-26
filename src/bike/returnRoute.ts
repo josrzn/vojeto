@@ -43,6 +43,14 @@ export interface RideVariant {
   stages: RideStage[];
   /** Simplified [lon, lat] polyline, small enough to ship to the browser. */
   geometry: number[][];
+  /**
+   * The router's untouched [lon, lat, elevation] track.
+   *
+   * Kept apart from `geometry` because the two have different jobs: the map
+   * wants few points, a GPX wants every one of them and the elevation too.
+   * Stripped out of plan.json before it is written; it goes to a .gpx instead.
+   */
+  track: number[][];
 }
 
 export interface VariantSpec {
@@ -208,6 +216,7 @@ async function planOne(
     neededBudgetHours: verdict.neededBudgetHours,
     stages,
     geometry: simplify(track.coordinates, 150),
+    track: track.coordinates,
   };
 }
 
