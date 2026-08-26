@@ -66,6 +66,31 @@ export function toGpx(options: GpxOptions): string {
 }
 
 /**
+ * The one-line summary that goes in a track's <desc>.
+ *
+ * Carries both names on purpose: the label is this project's own gloss and the
+ * profile is what BRouter was actually asked for, so seeing the raw name in a
+ * file does not leave you wondering which is which. Where they coincide, only
+ * one is shown.
+ */
+export function describeRide(ride: {
+  km: number;
+  ascentMetres: number;
+  hours: number;
+  label: string;
+  profile: string;
+}): string {
+  const via =
+    ride.label.toLowerCase() === ride.profile.toLowerCase()
+      ? ride.profile
+      : `${ride.profile} (${ride.label})`;
+  return (
+    `${ride.km.toFixed(0)} km, ${ride.ascentMetres} m of climbing, ` +
+    `about ${ride.hours.toFixed(1)} h riding via ${via}`
+  );
+}
+
+/**
  * Inserts points so no segment exceeds `maxMetres`.
  *
  * The router emits one point per OSM node, so a straight rural road can run a

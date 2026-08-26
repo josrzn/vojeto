@@ -110,10 +110,31 @@ Each profile is requested `alternatives` times, using BRouter's
 Identical results are dropped, and each is checked against the budget
 separately — a gravel route can be too slow for a day when the direct one fits.
 
-`profile` must be a profile the BRouter server actually has. `trekking`,
-`fastbike` and `shortest` are always present; **`gravel` and other extras depend
-on the server**, so check what yours offers (the profile dropdown at
-[brouter.de/brouter-web](https://brouter.de/brouter-web/) lists them). A profile
+#### What a profile actually is
+
+`profile` is the only thing in the routing request that decides which roads you
+get. A BRouter profile is a `.brf` file: a small cost-function program that
+scores every OpenStreetMap way from its tags, and the router then looks for the
+cheapest line. Broadly:
+
+| Profile | Optimises for | Tends to give you |
+| --- | --- | --- |
+| `trekking` | a pleasant ride | cycleways and quiet lanes, main roads penalised, motorways forbidden, tracks and gravel allowed but costly, and a detour preferred over a climb |
+| `fastbike` | speed on tarmac | smooth surfaces and directness, tolerating busier roads, less willing to go round |
+| `shortest` | distance, and nothing else | the least kilometres, however unpleasant |
+| `gravel` | unpaved riding | tracks and paths sought out rather than avoided |
+
+That is the shape of them rather than a specification — the profiles are readable
+files, and the dropdown at
+[brouter.de/brouter-web](https://brouter.de/brouter-web/) both lists what your
+server has and lets you inspect one.
+
+`label` is this project's own gloss and means nothing to BRouter; `profile` is
+the name sent over the wire. Exported tracks carry both, so a file that says
+`via trekking (Quiet roads)` is unambiguous about which is which.
+
+**Not every server has every profile.** `trekking`, `fastbike` and `shortest`
+are always present; `gravel` and other extras depend on the instance. A profile
 the server rejects is reported once and skipped — the other routes still build.
 
 ### Trains

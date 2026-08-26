@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { densify, slug, toGpx } from "../src/bike/gpx.js";
+import { densify, describeRide, slug, toGpx } from "../src/bike/gpx.js";
 import { haversine } from "../src/shared/geo.js";
 
 const track = [
@@ -141,5 +141,24 @@ describe("densify", () => {
   it("omits elevation when the source has none", () => {
     const dense = densify([[4.0, 46.0], [4.0, 46.02]], 200);
     expect(dense[1]).toHaveLength(2);
+  });
+});
+
+describe("describeRide", () => {
+  const ride = { km: 102.4, ascentMetres: 694, hours: 7.62, label: "Quiet roads", profile: "trekking" };
+
+  it("names both the profile asked for and this project's gloss for it", () => {
+    expect(describeRide(ride)).toBe(
+      "102 km, 694 m of climbing, about 7.6 h riding via trekking (Quiet roads)",
+    );
+  });
+
+  it("does not repeat itself when the two names agree", () => {
+    expect(describeRide({ ...ride, label: "trekking" })).toContain("via trekking");
+    expect(describeRide({ ...ride, label: "trekking" })).not.toContain("(");
+  });
+
+  it("ignores case when deciding whether the names agree", () => {
+    expect(describeRide({ ...ride, label: "Trekking" })).not.toContain("(");
   });
 });

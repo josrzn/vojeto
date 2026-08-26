@@ -6,7 +6,7 @@ import { formatDate, formatDuration, formatTime } from "../gtfs/time.js";
 import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
-import { densify, slug, toGpx } from "../bike/gpx.js";
+import { densify, describeRide, slug, toGpx } from "../bike/gpx.js";
 import { maxRideKm } from "../bike/effort.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
@@ -446,9 +446,7 @@ async function exportVariant(
   }
 
   const file = `${slug(stationName)}-${slug(variant.id)}.gpx`;
-  const summary =
-    `${variant.km.toFixed(0)} km, ${variant.ascentMetres} m of climbing, ` +
-    `about ${variant.hours.toFixed(1)} h riding via ${variant.profile}`;
+  const summary = describeRide(variant);
 
   await mkdir(gpxDir, { recursive: true });
   await writeFile(
