@@ -215,19 +215,46 @@ stations by the line of your final leg for exactly this reason: a corridor
 collapses to one row showing the range of rides it offers, and opens into the
 stations along it, ordered by ride length. Four lines beat 110 flat rows.
 
-## Checking the route filter
+## How TER is separated from everything else
 
-This is the one part that depends on how SNCF labels things this month, so it
-is the first place to look if the numbers seem wrong.
+This is the least obvious part of the feed, and worth understanding before you
+change any of it.
+
+`routes.txt` carries **no usable service type**. Every rail route is
+`route_type` 2, the agency is `SNCF VOYAGEURS` for almost all of them, and the
+names look like `C30` / `Saint-Étienne - Roanne`. The string "TER" does not
+appear anywhere. Filtering on names cannot work.
+
+What does work is the **stop point id**, which encodes the service:
+
+```
+StopArea:OCE87726802                the station "Roanne"
+  StopPoint:OCETrain TER-87726802     TER trains call here
+  StopPoint:OCECar TER-87726802       TER replacement coaches call here
+  StopPoint:OCEINTERCITES-87726802    Intercités call here
+```
+
+Every trip calls exclusively at stop points of a single kind — this holds for
+all 43,517 trips in the feed — so filtering stops by kind also selects trips.
+`gtfs.keepStopKinds` is that filter, and it defaults to `["OCETrain TER"]`.
+
+That `OCECar TER` line matters: those are **buses replacing trains**, about
+5,000 trips. They carry the TER brand, they would pass any name-based filter,
+and they will not take your bike.
+
+### When the numbers look wrong
 
 ```sh
 npm run ingest -- --explain-routes
 ```
 
-It reports how many routes were read, breaks them down by `route_type` with a
-rail/not-rail verdict, and lists the kept and dropped labels. **If nothing
-matches, `ingest` prints that same report automatically** — you never need a
-second run to find out why.
+It lists every stop kind with a count, reports how many routes were read, breaks
+them down by `route_type` with a rail/not-rail verdict, and lists the kept and
+dropped labels. **If the filter leaves nothing, `ingest` prints that report
+automatically** — you never need a second run to find out why.
+
+`gtfs.keepRoutePatterns` / `gtfs.dropRoutePatterns` remain as an escape hatch,
+but default to empty, because in this feed they have nothing useful to match on.
 
 Two ways to fix a mismatch:
 
@@ -241,6 +268,92 @@ Two ways to fix a mismatch:
 
 Note that rail covers both `route_type` 2 and the extended range 100–117
 (102 is long distance, 106 regional), because feeds use both.
+
+## The map of what is possible
+
+Trains and bikes distort geography in opposite ways, and the map can show it.
+
+```sh
+npm run plan -- --field
+```
+
+This samples ride-time-home on a grid and draws it as contours under the
+stations. The rings are smooth and roughly centred on home, squashed where the
+hills are; the stations sit in a couple of thin lines, because that is where the
+railway happens to go.
+
+The two layers are deliberately **not** the same kind of thing. **The rings are
+continuous** — you can ride home from any point, so ride time is a real field
+over the ground. **The stations are discrete** — you cannot be dropped anywhere
+but a station, so they are dots and never a shaded region. Drawing train reach
+as a field would suggest you could start anywhere inside it, which is false.
+
+Stations no morning train reaches are drawn hollow, and can be switched on in
+the legend. This is the most direct answer to "why can't I get to X": Moulins
+sits well inside the riding contours, so the bike was never the obstacle — it
+simply has no morning train from Roanne.
+
+Selecting a station also draws the train out (through the stops it calls at —
+the feed ships no `shapes.txt`, so this is not the track alignment), the ride
+home, and optionally a dashed contour at `budgetHours - train time`.
+
+A healthy field gives closed, nested rings. **Broken arcs mean holes**: a sample
+the router refused excludes every cell touching it. `plan` reports the three
+counts separately and warns when failures are high enough to show.
+
+Sampling costs one request per grid point — about 200 for a 20 km grid over a
+160 km radius, cached afterwards. `ride.field.spacingKm` trades detail against
+requests, and the cost grows with its square.
+
+## Reading the climbing
+
+Selecting a ride draws an elevation profile in the trip panel and shades the
+route on the map by gradient, from the same data and the same scale. Hovering
+the profile marks that point on the map.
+
+Gradient is banded — flat or downhill, 1–3%, 3–6%, 6–9%, 9%+ — on a single-hue
+ordinal ramp, light to dark, so steepness reads as depth of colour rather than a
+change of hue. Flat and downhill take a recessive grey: climbing is what costs
+you. Every band is labelled, so nothing rests on colour alone.
+
+The map splits warm from cool: **the bike is red** (the ride, and the gradient
+ramp that shades it) and **the train is blue**. Stations are green; home is
+plain ink, being an anchor rather than a series.
+
+Two things the numbers cannot do:
+
+- The elevations come from a roughly 30 m model. The series is smoothed before
+  gradients are taken, so a short sharp pitch may read gentler than it rides.
+- Gradients are measured over an even `ride.profileStepMetres` (100 m by
+  default), not between the router's own points, which are spaced by OSM nodes
+  and would each cover a different distance.
+
+Profiles are written to `public/data/profiles/`, one small file per ride
+(~10 KB), fetched only when you look at that ride.
+
+## Taking a route with you
+
+Every routed ride gets a GPX in `public/data/gpx/`, linked from the trip panel —
+including rides that overrun the budget, since the route exists and you may want
+it for a longer day.
+
+These come from the router's **untouched** track: every point it returned, with
+elevation. The line on the map is a different thing, simplified and stripped of
+elevation, because a map wants few points and a device at a junction wants all
+of them.
+
+One further step is applied on the way out. BRouter emits one point per OSM
+node, so a straight rural road can run a kilometre between two of them: correct,
+but importers that map-match a track to their own network have nothing to match
+over such a gap and report the stretch as leaving known ways. Exports are
+densified so no step exceeds `ride.gpx.maxPointSpacingMetres` (50 m by default,
+0 to disable). On a 102 km route that took the longest step from 1226 m to 50 m
+and left the length unchanged to within 10 m.
+
+That will not help where the route genuinely uses a way the importer lacks. The
+`trekking` profile is happy on tracks and paths a road-biased network may not
+carry. If an importer still objects, letting it snap the route to its own
+network is the reasonable answer.
 
 ## Commands
 

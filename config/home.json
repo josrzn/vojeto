@@ -51,9 +51,10 @@
       "radiusKm": 0
     },
     "gpx": {
-      "$comment": "Inserts points into exported tracks so no step exceeds this, which keeps map-matching importers (Komoot, Garmin) happy over long straight roads. 0 disables.",
+      "$comment": "Exported tracks: maxPointSpacingMetres inserts points so no step exceeds it, which keeps map-matching importers (Komoot, Garmin) happy over long straight roads; 0 disables. profileStepMetres (a sibling of gpx) sets the spacing of the elevation profile shown in the app.",
       "maxPointSpacingMetres": 50
-    }
+    },
+    "profileStepMetres": 100
   },
   "gtfs": {
     "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
