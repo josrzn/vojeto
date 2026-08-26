@@ -115,14 +115,22 @@ export function MapView({
 
         // Drawn first, so the field stays a backdrop and never competes with
         // the stations, which are the only places you can actually start.
+        // A white casing under the contour, so it reads over a detailed
+        // basemap instead of disappearing into the roads.
+        instance.addLayer({
+          id: "field-casing",
+          type: "line",
+          source: FIELD_SOURCE,
+          paint: { "line-color": "#ffffff", "line-width": 4, "line-opacity": 0.65 },
+        });
         instance.addLayer({
           id: "field-lines",
           type: "line",
           source: FIELD_SOURCE,
           paint: {
-            "line-color": "#4c8577",
-            "line-width": ["interpolate", ["linear"], ["get", "level"], 2, 0.6, 12, 1.6],
-            "line-opacity": 0.5,
+            "line-color": "#2f6b5b",
+            "line-width": ["interpolate", ["linear"], ["get", "level"], 2, 1.2, 12, 2.4],
+            "line-opacity": 0.9,
           },
         });
         instance.addLayer({
@@ -132,7 +140,8 @@ export function MapView({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-color": "#1d3557",
-            "line-width": 2.5,
+            "line-width": 3,
+            "line-opacity": 0.95,
             "line-dasharray": [2, 1.5],
           },
         });

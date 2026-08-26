@@ -12,6 +12,16 @@ export interface FieldOptions extends Omit<BRouterOptions, "alternative"> {
   onProgress?: (done: number, total: number) => void;
 }
 
+export interface FieldResult {
+  grid: Grid;
+  /** Points actually routed. */
+  sampled: number;
+  /** Points the router could not reach, even on a retry. These leave holes. */
+  failed: number;
+  /** Points outside the radius, never attempted. Not holes in anything. */
+  skipped: number;
+}
+
 const KM_PER_DEGREE_LAT = 110.574;
 
 /**
@@ -24,7 +34,7 @@ const KM_PER_DEGREE_LAT = 110.574;
  * Points BRouter cannot route (mid-lake, across a border with no roads) stay
  * null so the contours leave a hole instead of inventing ground.
  */
-export async function sampleRideField(home: Point, options: FieldOptions): Promise<Grid> {
+export async function sampleRideField(home: Point, options: FieldOptions): Promise<FieldResult> {
   const latStep = options.spacingKm / KM_PER_DEGREE_LAT;
   const lonStep =
     options.spacingKm / (KM_PER_DEGREE_LAT * Math.cos((home.lat * Math.PI) / 180));
@@ -38,6 +48,9 @@ export async function sampleRideField(home: Point, options: FieldOptions): Promi
   const values: Array<number | null> = new Array(rows * cols).fill(null);
   const total = rows * cols;
   let done = 0;
+  let sampled = 0;
+  let failed = 0;
+  let skipped = 0;
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -47,28 +60,48 @@ export async function sampleRideField(home: Point, options: FieldOptions): Promi
 
       // Skip the corners of the square: they are outside the radius we care
       // about and each one costs a request.
-      if (haversine(home, point) > options.radiusKm * 1000) continue;
+      if (haversine(home, point) > options.radiusKm * 1000) {
+        skipped++;
+        continue;
+      }
 
-      try {
-        const track = await routeBike([point, home], {
+      const route = async () =>
+        routeBike([point, home], {
           baseUrl: options.baseUrl,
           cacheDir: options.cacheDir,
           profile: options.profile,
           alternative: 0,
           ...(options.throttleMs !== undefined ? { throttleMs: options.throttleMs } : {}),
         });
+
+      try {
+        let track;
+        try {
+          track = await route();
+        } catch {
+          // One retry: a long route is a big ask of a shared server, and a
+          // single refusal punches a hole through every contour near it.
+          track = await route();
+        }
         values[row * cols + col] = rideHours(
           track.metres / 1000,
           track.ascentMetres,
           options.effort,
         );
+        sampled++;
       } catch {
-        // Leave it null: no road home from here that BRouter knows about.
+        // Genuinely no route home from here that the router can find.
+        failed++;
       }
     }
   }
 
-  return { south, west, latStep, lonStep, rows, cols, values };
+  return {
+    grid: { south, west, latStep, lonStep, rows, cols, values },
+    sampled,
+    failed,
+    skipped,
+  };
 }
 
 /** How many routing requests a given grid will cost, for warning before it runs. */

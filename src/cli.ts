@@ -134,7 +134,7 @@ async function main(): Promise<void> {
             `${requests} routing requests (about ${Math.ceil(requests / 60)} min uncached)`,
         );
         let lastReport = 0;
-        field = await sampleRideField(config.home.rideTo, {
+        const result = await sampleRideField(config.home.rideTo, {
           baseUrl: config.ride.brouterUrl,
           cacheDir: CACHE_DIR,
           profile: config.ride.variants[0]?.profile ?? "trekking",
@@ -147,8 +147,19 @@ async function main(): Promise<void> {
             console.log(`  field: ${done}/${total}`);
           },
         });
-        const known = field.values.filter((v) => v !== null).length;
-        console.log(`  field: ${known} of ${field.values.length} samples reachable by bike`);
+        field = result.grid;
+        console.log(
+          `  field: ${result.sampled} routed, ${result.failed} with no route, ` +
+            `${result.skipped} outside the radius (never tried)`,
+        );
+        if (result.failed > result.sampled * 0.02) {
+          console.warn(
+            `  warning: ${result.failed} samples failed. Each one punches a hole through\n` +
+              `  every contour near it, which is what makes the rings look broken. A shared\n` +
+              `  BRouter often refuses long routes; try a smaller ride.field.radiusKm, or\n` +
+              `  run your own instance and pass --brouter.`,
+          );
+        }
       }
 
       const plan = await buildPlan(index, config, {
