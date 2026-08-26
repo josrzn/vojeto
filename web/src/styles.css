@@ -228,28 +228,72 @@ code {
   position: absolute;
   right: 1rem;
   bottom: 1rem;
-  width: min(280px, calc(100% - 2rem));
+  width: min(310px, calc(100% - 2rem));
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 0.6rem 0.75rem;
+  padding: 0.65rem 0.8rem 0.7rem;
   box-shadow: 0 6px 18px rgb(27 36 48 / 10%);
 }
-.field-key label {
+.field-key h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #93a1b0;
+}
+
+.key {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.key li, .key label {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
 }
-.field-key p {
-  margin: 0.35rem 0 0;
-  font-size: 0.72rem;
-  line-height: 1.35;
+.key label { cursor: pointer; }
+
+.swatch {
+  flex: none;
+  width: 18px;
+  height: 0;
+  border-top-width: 3px;
+  border-top-style: solid;
+}
+.swatch-train { border-top-color: var(--rail); }
+.swatch-ride { border-top-color: var(--bike); }
+.swatch-ring { border-top-color: #2f6b5b; border-top-width: 2px; }
+.swatch-dash {
+  display: inline-block;
+  border-top-style: dashed;
+  border-top-color: var(--rail);
+  vertical-align: middle;
+}
+.swatch-dot, .swatch-hollow {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #4c8577;
+  background: #4c8577;
+}
+.swatch-hollow { border-color: #93a1b0; background: #fff; }
+
+.key-note {
+  margin: 0.5rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.73rem;
+  line-height: 1.4;
   color: var(--ink-soft);
 }
-.field-key-frontier { color: var(--rail); }
+.key-note strong { color: var(--rail); }
 
 .detail {
   position: absolute;

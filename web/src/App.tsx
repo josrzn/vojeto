@@ -40,6 +40,7 @@ export function App() {
   const [openCorridors, setOpenCorridors] = useState<Set<string>>(new Set());
   const [showMisses, setShowMisses] = useState(false);
   const [showField, setShowField] = useState(true);
+  const [showNoTrain, setShowNoTrain] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,43 +264,75 @@ export function App() {
             chosen ? settings.budgetHours - chosen.travelMinutes / 60 : null
           }
           showField={showField && load.plan.field !== null}
+          showNoTrain={showNoTrain}
           onSelect={(id) => {
             setSelected(id);
             setVariantId(null);
           }}
         />
 
-        {load.plan.field && (
-          <div className="field-key">
-            <label>
-              <input
-                type="checkbox"
-                checked={showField}
-                onChange={(e) => setShowField(e.target.checked)}
-              />
-              ride time home
-            </label>
-            <p>
-              Green rings are hours of riding back from any point. Dots are
-              stations — the only places the train can drop you.
-            </p>
-            {chosen && (
-              <p className="field-key-frontier">
-                Dashed: {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} left
-                after the train to {chosen.name}. Anywhere inside it, you could ride home.
-              </p>
+        <div className="field-key">
+          <h3>What you are looking at</h3>
+
+          <ul className="key">
+            <li>
+              <span className="swatch swatch-train" /> train out, through the stops it
+              calls at
+            </li>
+            <li>
+              <span className="swatch swatch-ride" /> ride home
+            </li>
+            <li>
+              <span className="swatch swatch-dot" /> station with a morning train
+            </li>
+            {load.plan.noTrain.length > 0 && (
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showNoTrain}
+                    onChange={(e) => setShowNoTrain(e.target.checked)}
+                  />
+                  <span className="swatch swatch-hollow" /> station with no morning train
+                  ({load.plan.noTrain.length})
+                </label>
+              </li>
             )}
-          </div>
-        )}
-        {chosen && (
-          <TripDetail
-            destination={chosen}
-            variants={variants}
-            active={activeVariant}
-            onPickVariant={setVariantId}
-            onClose={() => setSelected(null)}
-          />
-        )}
+            {load.plan.field && (
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showField}
+                    onChange={(e) => setShowField(e.target.checked)}
+                  />
+                  <span className="swatch swatch-ring" /> hours of riding home, from
+                  anywhere
+                </label>
+              </li>
+            )}
+          </ul>
+
+          {load.plan.field && showField && (
+            <p className="key-note">
+              {chosen && activeVariant ? (
+                <>
+                  <span className="swatch swatch-dash" /> <strong>your limit today</strong>:{" "}
+                  {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} of riding
+                  left after the train to {chosen.name}. The ride is{" "}
+                  {formatHours(activeVariant.hours)}, so {chosen.name} falls{" "}
+                  {activeVariant.feasible ? "inside" : "outside"} it.
+                </>
+              ) : (
+                <>
+                  Pick a station and a dashed line appears: the riding you would have left
+                  after that train, so you can see what else was in reach.
+                </>
+              )}
+            </p>
+          )}
+        </div>
+
       </main>
     </div>
   );

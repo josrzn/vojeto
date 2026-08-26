@@ -25,6 +25,8 @@ export interface PlanLeg {
   trainNumber: string;
   /** Minutes spent waiting at the station before this leg. 0 on the first. */
   waitMinutes: number;
+  /** [lon, lat] of every stop this leg calls at, for drawing it on the map. */
+  path: number[][];
 }
 
 export interface PlanDestination {
@@ -83,6 +85,14 @@ export interface Plan {
   /** Stations reached by train but with no ride home that fits the budget. */
   rejected: PlanRejection[];
   /**
+   * Stations within riding range that no train reaches in time.
+   *
+   * The point of drawing these: somewhere like Moulins sits well inside the
+   * ride-home contours, so the bike was never the problem. Showing it as a
+   * station with no morning train says that far better than its absence does.
+   */
+  noTrain: Array<{ stationId: string; name: string; lat: number; lon: number }>;
+  /**
    * Ride-time-home sampled on a grid, or null when not built.
    *
    * Deliberately separate from `rides`: the grid is a continuous backdrop for
@@ -125,6 +135,10 @@ export async function buildPlan(
 
   const months: Plan["months"] = [];
   const candidates = new Map<string, { point: StationMatch; trainHours: number }>();
+  // Every station any sampled date can reach, before the ride is considered.
+  // "No train goes there" has to mean exactly that, not "the ride ruled it out"
+  // and not "--limit stopped short of routing it".
+  const trainReachable = new Set<string>();
 
   for (const sample of dates) {
     const itineraries = reachableStations(index, {
@@ -143,6 +157,7 @@ export async function buildPlan(
     let outOfRange = 0;
     for (const itinerary of itineraries) {
       if (!Number.isFinite(itinerary.lat) || !Number.isFinite(itinerary.lon)) continue;
+      trainReachable.add(itinerary.destination);
 
       // A ride can only be longer than the straight line, so anything already
       // beyond what the budget allows is not worth asking BRouter about.
@@ -307,8 +322,34 @@ export async function buildPlan(
     months,
     rides,
     rejected,
+    noTrain: stationsWithoutTrains(index, rideTo, config, trainReachable, station),
     field: options.field ?? null,
   };
+}
+
+/**
+ * TER stations close enough to ride home from that no month's trains reach.
+ *
+ * Bounded by the same reach as the destinations themselves, so the map only
+ * shows places where the ride was genuinely never the obstacle.
+ */
+function stationsWithoutTrains(
+  index: TimetableIndex,
+  rideTo: Point,
+  config: Config,
+  trainReachable: ReadonlySet<string>,
+  home: StationMatch,
+): Plan["noTrain"] {
+  const reachKm = maxRideKm(0, config.ride.budget, config.ride.effort);
+
+  return stationPoints(index)
+    .filter(
+      (station) =>
+        station.stationId !== home.stationId &&
+        !trainReachable.has(station.stationId) &&
+        haversine(rideTo, station) / 1000 <= reachKm,
+    )
+    .map(({ stationId, name, lat, lon }) => ({ stationId, name, lat, lon }));
 }
 
 /**
@@ -388,6 +429,7 @@ function toDestination(itinerary: Itinerary): PlanDestination {
       trainNumber: isTrainNumber ? leg.headsign.trim() : "",
       waitMinutes:
         i === 0 ? 0 : Math.round((leg.departure - itinerary.legs[i - 1]!.arrival) / 60),
+      path: leg.calls.map((call) => [call.lon, call.lat]),
     };
   });
 

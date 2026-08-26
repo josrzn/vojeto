@@ -21,10 +21,13 @@ interface Props {
    */
   frontierHours: number | null;
   showField: boolean;
+  showNoTrain: boolean;
   onSelect: (stationId: string | null) => void;
 }
 
 const FIELD_SOURCE = "ride-field";
+const TRAIN_SOURCE = "train";
+const NOTRAIN_SOURCE = "no-train";
 const FRONTIER_SOURCE = "frontier";
 const STATIONS_SOURCE = "stations";
 const ROUTE_SOURCE = "route";
@@ -37,6 +40,7 @@ export function MapView({
   variant,
   frontierHours,
   showField,
+  showNoTrain,
   onSelect,
 }: Props) {
   // Contours are derived in the browser rather than baked into plan.json, so
@@ -48,6 +52,11 @@ export function MapView({
     for (let hours = 2; hours <= top; hours += 2) levels.push(hours);
     return contourFeatures(plan.field, levels);
   }, [plan.field, plan.settings.budgetHours]);
+
+  const selectedLegs = useMemo(
+    () => destinations.find((d) => d.stationId === selected)?.legs ?? null,
+    [destinations, selected],
+  );
 
   const fieldBounds = useMemo((): [[number, number], [number, number]] | null => {
     const grid = plan.field;
@@ -111,6 +120,8 @@ export function MapView({
         }
         instance.addSource(FIELD_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(FRONTIER_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(TRAIN_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(NOTRAIN_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(ROUTE_SOURCE, { type: "geojson", data: emptyCollection() });
 
         // Drawn first, so the field stays a backdrop and never competes with
@@ -147,6 +158,45 @@ export function MapView({
         });
         instance.addSource(STATIONS_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(STAGES_SOURCE, { type: "geojson", data: emptyCollection() });
+
+        // Stations the rail network serves but no morning train reaches: hollow,
+        // so they read as absences rather than as options.
+        instance.addLayer({
+          id: "no-train-dots",
+          type: "circle",
+          source: NOTRAIN_SOURCE,
+          paint: {
+            "circle-radius": 3.5,
+            "circle-color": "#ffffff",
+            "circle-stroke-color": "#93a1b0",
+            "circle-stroke-width": 1.5,
+            "circle-opacity": 0.9,
+          },
+        });
+
+        instance.addLayer({
+          id: "train-line",
+          type: "line",
+          source: TRAIN_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#1d3557",
+            "line-width": 3,
+            "line-opacity": 0.85,
+          },
+        });
+        instance.addLayer({
+          id: "train-calls",
+          type: "circle",
+          source: TRAIN_SOURCE,
+          filter: ["==", ["geometry-type"], "Point"],
+          paint: {
+            "circle-radius": 3,
+            "circle-color": "#1d3557",
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 1.5,
+          },
+        });
 
         instance.addLayer({
           id: "route-casing",
@@ -353,6 +403,47 @@ export function MapView({
     };
     paint();
   }, [ready, frontierLines, showField]);
+
+  // Stations the trains never reach in time.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const source = instance.getSource(NOTRAIN_SOURCE) as GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData({
+      type: "FeatureCollection",
+      features: showNoTrain
+        ? plan.noTrain.map((station) =>
+            point(station.lon, station.lat, { name: station.name }),
+          )
+        : [],
+    });
+  }, [ready, plan.noTrain, showNoTrain]);
+
+  // The journey out, drawn through the stops the train calls at.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const source = instance.getSource(TRAIN_SOURCE) as GeoJSONSource | undefined;
+    if (!source) return;
+
+    const legs = selectedLegs ?? [];
+    source.setData({
+      type: "FeatureCollection",
+      features: [
+        ...legs
+          .filter((leg) => leg.path.length > 1)
+          .map((leg) => ({
+            type: "Feature" as const,
+            properties: {},
+            geometry: { type: "LineString" as const, coordinates: leg.path },
+          })),
+        ...legs.flatMap((leg) =>
+          leg.path.map((c) => point(c[0]!, c[1]!, {})),
+        ),
+      ],
+    });
+  }, [ready, selectedLegs]);
 
   // The ride home for whichever destination is selected.
   useEffect(() => {

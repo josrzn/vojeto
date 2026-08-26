@@ -76,6 +76,13 @@ export interface TimetableIndex {
 }
 
 export interface Leg {
+  /**
+   * The stops this leg calls at, boarding to alighting.
+   *
+   * The feed ships no shapes.txt, so this is the closest thing to a route
+   * geometry available: where the train stops, not the track it runs on.
+   */
+  calls: Array<{ name: string; lat: number; lon: number }>;
   fromStop: string;
   fromName: string;
   toStop: string;

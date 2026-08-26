@@ -226,7 +226,13 @@ function buildItinerary(
     }
     const pattern = index.patterns[boarding.pattern]!;
     const boardStop = pattern.stops[boarding.boardPos]!;
+    const calls = pattern.stops
+      .slice(boarding.boardPos, boarding.alightPos + 1)
+      .map((s) => index.stops[s]!)
+      .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
+      .map((s) => ({ name: s.name, lat: s.lat, lon: s.lon }));
     legs.push({
+      calls,
       fromStop: index.stops[boardStop]!.id,
       fromName: index.stops[boardStop]!.name,
       toStop: index.stops[stop]!.id,
