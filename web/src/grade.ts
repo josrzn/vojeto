@@ -5,10 +5,12 @@ import { GRADE_BANDS, gradeBand } from "../../src/bike/profile.js";
  * legible as depth of colour rather than as a change of hue. Flat and downhill
  * take a recessive grey — they are not what costs you.
  *
- * Steps are the documented blue ordinal ramp (250, 400, 500, 700), which clears
- * the monotone-lightness, step-gap, light-end contrast and single-hue checks.
+ * Red, because the bike is the warm half of this map and the train the cool
+ * one. Two steps are documented hexes; the ramp as a whole was run through the
+ * ordinal checks (monotone lightness, step gaps, light-end contrast, single
+ * hue) rather than picked by eye.
  */
-export const GRADE_COLORS = ["#c3c2b7", "#86b6ef", "#3987e5", "#256abf", "#0d366b"] as const;
+export const GRADE_COLORS = ["#c3c2b7", "#f0a3a2", "#e66767", "#d03b3b", "#7d1c1c"] as const;
 
 export const GRADE_LABELS = [
   "flat or down",

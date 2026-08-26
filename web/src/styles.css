@@ -4,8 +4,8 @@
   --line: #dfe5ec;
   --paper: #ffffff;
   --panel: #f6f8fa;
-  --rail: #1d3557;
-  --bike: #d1495b;
+  --rail: #2a78d6;
+  --bike: #d03b3b;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
 }
@@ -280,7 +280,7 @@ code {
   border-top-style: solid;
 }
 /* Must track the map's paint: orange train, ride shaded by gradient. */
-.swatch-train { border-top-color: #eb6834; }
+.swatch-train { border-top-color: #2a78d6; }
 .swatch-ride {
   height: 3px;
   border: none;
@@ -288,10 +288,10 @@ code {
   background: linear-gradient(
     to right,
     #c3c2b7 0 20%,
-    #86b6ef 20% 40%,
-    #3987e5 40% 60%,
-    #256abf 60% 80%,
-    #0d366b 80% 100%
+    #f0a3a2 20% 40%,
+    #e66767 40% 60%,
+    #d03b3b 60% 80%,
+    #7d1c1c 80% 100%
   );
 }
 .swatch-ring { border-top-color: #2f6b5b; border-top-width: 2px; }
@@ -305,8 +305,8 @@ code {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid #4c8577;
-  background: #4c8577;
+  border: 2px solid #1baf7a;
+  background: #1baf7a;
 }
 .swatch-hollow { border-color: #93a1b0; background: #fff; }
 
@@ -369,7 +369,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  border-left: 3px solid #eb6834;
+  border-left: 3px solid var(--rail);
   padding-left: 0.6rem;
 }
 .stages li { border-left-color: var(--bike); }
@@ -406,7 +406,7 @@ code {
 .profile-tick-end { text-anchor: end; }
 
 /* A wash, so the banded line above it stays the thing you read. */
-.profile-area { fill: #3987e5; fill-opacity: 0.1; }
+.profile-area { fill: #d03b3b; fill-opacity: 0.1; }
 .profile-line { fill: none; stroke-width: 2; stroke-linecap: round; }
 .profile-crosshair { stroke: #898781; stroke-width: 1; }
 .profile-dot { stroke: #ffffff; stroke-width: 2; }

@@ -159,7 +159,8 @@ export function MapView({
           source: FRONTIER_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": "#1d3557",
+            // Neutral: a budget line, and it must not read as the train.
+            "line-color": "#52514e",
             "line-width": 3,
             "line-opacity": 0.95,
             "line-dasharray": [2, 1.5],
@@ -189,9 +190,9 @@ export function MapView({
           source: TRAIN_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            // Orange, not navy: the grade ramp owns blue on this map, and a
-            // navy train line beside a dark-blue steep pitch reads as one thing.
-            "line-color": "#eb6834",
+            // The train is the cool half of the map; the bike and its gradient
+            // ramp are the warm half.
+            "line-color": "#2a78d6",
             "line-width": 3,
             "line-opacity": 0.9,
           },
@@ -204,7 +205,7 @@ export function MapView({
           paint: {
             "circle-radius": 7,
             "circle-color": "#ffffff",
-            "circle-stroke-color": "#eb6834",
+            "circle-stroke-color": "#2a78d6",
             "circle-stroke-width": 3,
           },
         });
@@ -215,7 +216,7 @@ export function MapView({
           filter: ["all", ["==", ["geometry-type"], "Point"], ["!=", ["get", "change"], true]],
           paint: {
             "circle-radius": 3,
-            "circle-color": "#eb6834",
+            "circle-color": "#2a78d6",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 1.5,
           },
@@ -235,7 +236,7 @@ export function MapView({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             // Falls back to the ride's own colour until the elevation arrives.
-            "line-color": ["coalesce", ["get", "color"], "#d1495b"],
+            "line-color": ["coalesce", ["get", "color"], "#d03b3b"],
             "line-width": 3.5,
           },
         });
@@ -245,7 +246,7 @@ export function MapView({
           source: HOVER_SOURCE,
           paint: {
             "circle-radius": 6,
-            "circle-color": "#0d366b",
+            "circle-color": "#7d1c1c",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2.5,
           },
@@ -258,7 +259,7 @@ export function MapView({
           paint: {
             "circle-radius": 5,
             "circle-color": "#ffffff",
-            "circle-stroke-color": "#d1495b",
+            "circle-stroke-color": "#d03b3b",
             "circle-stroke-width": 2.5,
           },
         });
@@ -271,9 +272,12 @@ export function MapView({
             "circle-radius": ["case", ["get", "isHome"], 7, ["get", "isSelected"], 8, 5],
             "circle-color": [
               "case",
-              ["get", "isHome"], "#1d3557",
-              ["get", "isSelected"], "#d1495b",
-              "#4c8577",
+              // Home is an anchor rather than a series, so it wears ink; the
+              // aqua for stations clears the chroma floor that the old
+              // desaturated green did not.
+              ["get", "isHome"], "#0b0b0b",
+              ["get", "isSelected"], "#d03b3b",
+              "#1baf7a",
             ],
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2,
@@ -311,7 +315,7 @@ export function MapView({
               "text-anchor": "bottom",
               "text-allow-overlap": true,
             },
-            paint: { "text-color": "#1d3557", "text-halo-color": "#ffffff", "text-halo-width": 1.8 },
+            paint: { "text-color": "#2a78d6", "text-halo-color": "#ffffff", "text-halo-width": 1.8 },
           });
           instance.addLayer({
             id: "stage-labels",
