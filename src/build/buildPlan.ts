@@ -7,6 +7,7 @@ import { formatHours, formatHoursCeil } from "../shared/format.js";
 import { reachableStations } from "../router/raptor.js";
 import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRoute.js";
 import { maxRideKm } from "../bike/effort.js";
+import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
 import { resolveHome, type StationMatch } from "./stations.js";
 import { sampleDates } from "./dates.js";
@@ -81,6 +82,14 @@ export interface Plan {
   rides: Record<string, RideVariant[]>;
   /** Stations reached by train but with no ride home that fits the budget. */
   rejected: PlanRejection[];
+  /**
+   * Ride-time-home sampled on a grid, or null when not built.
+   *
+   * Deliberately separate from `rides`: the grid is a continuous backdrop for
+   * the map, while `rides` are the real routes from actual stations. Only the
+   * latter are trips you can take.
+   */
+  field: Grid | null;
 }
 
 export interface BuildOptions {
@@ -88,6 +97,8 @@ export interface BuildOptions {
   limit?: number;
   /** Skip BRouter entirely and emit train results only. */
   skipBike?: boolean;
+  /** Prebuilt ride-time field to embed, if one was sampled. */
+  field?: Grid | null;
   cacheDir: string;
 }
 
@@ -296,6 +307,7 @@ export async function buildPlan(
     months,
     rides,
     rejected,
+    field: options.field ?? null,
   };
 }
 

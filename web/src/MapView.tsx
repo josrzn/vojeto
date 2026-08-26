@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MapLibreMap,
@@ -7,6 +7,7 @@ import maplibregl, {
 import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
 import type { RideVariant } from "../../src/bike/returnRoute.js";
+import { contourFeatures } from "../../src/bike/contour.js";
 
 interface Props {
   plan: Plan;
@@ -14,17 +15,69 @@ interface Props {
   selected: string | null;
   /** The way home currently being shown, or null when nothing is selected. */
   variant: RideVariant | null;
+  /**
+   * Riding hours left after the selected station's train, i.e. the contour of
+   * the ride field that is that station's personal frontier.
+   */
+  frontierHours: number | null;
+  showField: boolean;
   onSelect: (stationId: string | null) => void;
 }
 
+const FIELD_SOURCE = "ride-field";
+const FRONTIER_SOURCE = "frontier";
 const STATIONS_SOURCE = "stations";
 const ROUTE_SOURCE = "route";
 const STAGES_SOURCE = "stages";
 
-export function MapView({ plan, destinations, selected, variant, onSelect }: Props) {
+export function MapView({
+  plan,
+  destinations,
+  selected,
+  variant,
+  frontierHours,
+  showField,
+  onSelect,
+}: Props) {
+  // Contours are derived in the browser rather than baked into plan.json, so
+  // the frontier can follow the selection without another build.
+  const fieldLines = useMemo(() => {
+    if (!plan.field) return null;
+    const top = Math.ceil(plan.settings.budgetHours);
+    const levels: number[] = [];
+    for (let hours = 2; hours <= top; hours += 2) levels.push(hours);
+    return contourFeatures(plan.field, levels);
+  }, [plan.field, plan.settings.budgetHours]);
+
+  const fieldBounds = useMemo((): [[number, number], [number, number]] | null => {
+    const grid = plan.field;
+    if (!grid) return null;
+    const known = grid.values
+      .map((value, i) => (value === null ? null : i))
+      .filter((i): i is number => i !== null);
+    if (known.length === 0) return null;
+    const lons = known.map((i) => grid.west + (i % grid.cols) * grid.lonStep);
+    const lats = known.map((i) => grid.south + Math.floor(i / grid.cols) * grid.latStep);
+    return [
+      [Math.min(...lons), Math.min(...lats)],
+      [Math.max(...lons), Math.max(...lats)],
+    ];
+  }, [plan.field]);
+
+  const frontierLines = useMemo(() => {
+    if (!plan.field || frontierHours === null || frontierHours <= 0) return null;
+    return contourFeatures(plan.field, [frontierHours])[0] ?? null;
+  }, [plan.field, frontierHours]);
+
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
-  const ready = useRef(false);
+  /**
+   * State, not a ref: the map is built inside an async effect, so the layer
+   * effects below run before it exists. Without a state change to bring them
+   * back they would only ever repaint by luck, when some other dependency
+   * happened to be freshly allocated.
+   */
+  const [ready, setReady] = useState(false);
   // The click handler is registered once, so it reads the current callback here
   // rather than closing over a stale one.
   const onSelectRef = useRef(onSelect);
@@ -51,7 +104,38 @@ export function MapView({ plan, destinations, selected, variant, onSelect }: Pro
 
       instance.on("load", () => {
         if (!instance) return;
+        // Frame the whole ride-time field on opening: its extent is the area
+        // the trip could possibly cover, which is what you want to see first.
+        if (fieldBounds) {
+          instance.fitBounds(fieldBounds, { padding: 60, duration: 0 });
+        }
+        instance.addSource(FIELD_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addSource(FRONTIER_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(ROUTE_SOURCE, { type: "geojson", data: emptyCollection() });
+
+        // Drawn first, so the field stays a backdrop and never competes with
+        // the stations, which are the only places you can actually start.
+        instance.addLayer({
+          id: "field-lines",
+          type: "line",
+          source: FIELD_SOURCE,
+          paint: {
+            "line-color": "#4c8577",
+            "line-width": ["interpolate", ["linear"], ["get", "level"], 2, 0.6, 12, 1.6],
+            "line-opacity": 0.5,
+          },
+        });
+        instance.addLayer({
+          id: "frontier-line",
+          type: "line",
+          source: FRONTIER_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#1d3557",
+            "line-width": 2.5,
+            "line-dasharray": [2, 1.5],
+          },
+        });
         instance.addSource(STATIONS_SOURCE, { type: "geojson", data: emptyCollection() });
         instance.addSource(STAGES_SOURCE, { type: "geojson", data: emptyCollection() });
 
@@ -103,6 +187,22 @@ export function MapView({ plan, destinations, selected, variant, onSelect }: Pro
         // has no way to provide, so labels are added only when one exists.
         if (style.hasGlyphs) {
           instance.addLayer({
+            id: "field-labels",
+            type: "symbol",
+            source: FIELD_SOURCE,
+            layout: {
+              "symbol-placement": "line",
+              "text-field": ["concat", ["to-string", ["get", "level"]], "h"],
+              "text-size": 11,
+              "symbol-spacing": 220,
+            },
+            paint: {
+              "text-color": "#3d6b5e",
+              "text-halo-color": "#ffffff",
+              "text-halo-width": 1.6,
+            },
+          });
+          instance.addLayer({
             id: "stage-labels",
             type: "symbol",
             source: STAGES_SOURCE,
@@ -142,24 +242,25 @@ export function MapView({ plan, destinations, selected, variant, onSelect }: Pro
           });
         }
 
-        ready.current = true;
-        // The data effects below may have run before the style finished loading.
-        instance.fire("vojeto.ready");
+        setReady(true);
       });
     })();
 
     return () => {
       cancelled = true;
-      ready.current = false;
+      setReady(false);
       instance?.remove();
       map.current = null;
     };
+    // fieldBounds is only read when the map is first built; it is derived from
+    // plan.field, which does not change while the page is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.settings.mapStyleUrl, plan.home.rideTo.lat, plan.home.rideTo.lon]);
 
   // Station markers for the current month.
   useEffect(() => {
     const instance = map.current;
-    if (!instance) return;
+    if (!instance || !ready) return;
 
     const paint = () => {
       const source = instance.getSource(STATIONS_SOURCE) as GeoJSONSource | undefined;
@@ -191,14 +292,63 @@ export function MapView({ plan, destinations, selected, variant, onSelect }: Pro
       });
     };
 
-    if (ready.current) paint();
-    else instance.once("vojeto.ready", paint);
-  }, [plan.home, destinations, selected]);
+    paint();
+  }, [ready, plan.home, destinations, selected]);
+
+  // The continuous ride-time-home backdrop.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const paint = () => {
+      const source = instance.getSource(FIELD_SOURCE) as GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData({
+        type: "FeatureCollection",
+        features:
+          showField && fieldLines
+            ? fieldLines.map((contour) => ({
+                type: "Feature" as const,
+                properties: { level: contour.level },
+                geometry: { type: "MultiLineString" as const, coordinates: contour.coordinates },
+              }))
+            : [],
+      });
+    };
+    paint();
+  }, [ready, fieldLines, showField]);
+
+  // The selected station's own frontier: how far out you could still ride home
+  // from, once that station's train has been paid for.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const paint = () => {
+      const source = instance.getSource(FRONTIER_SOURCE) as GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData({
+        type: "FeatureCollection",
+        features:
+          showField && frontierLines
+            ? [
+                {
+                  type: "Feature" as const,
+                  properties: { level: frontierLines.level },
+                  geometry: {
+                    type: "MultiLineString" as const,
+                    coordinates: frontierLines.coordinates,
+                  },
+                },
+              ]
+            : [],
+      });
+    };
+    paint();
+  }, [ready, frontierLines, showField]);
 
   // The ride home for whichever destination is selected.
   useEffect(() => {
     const instance = map.current;
-    if (!instance) return;
+    if (!instance || !ready) return;
 
     const paint = () => {
       const routeSource = instance.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined;
@@ -250,9 +400,8 @@ export function MapView({ plan, destinations, selected, variant, onSelect }: Pro
       });
     };
 
-    if (ready.current) paint();
-    else instance.once("vojeto.ready", paint);
-  }, [variant]);
+    paint();
+  }, [ready, variant]);
 
   return <div className="map" ref={container} />;
 }

@@ -25,6 +25,7 @@ export interface Config {
     variants: VariantSpec[];
     alternatives: number;
     brouterUrl: string;
+    field: { spacingKm: number; radiusKm: number };
   };
   gtfs: {
     url: string;
@@ -131,6 +132,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
       variants,
       alternatives: Math.max(1, num(ride["alternatives"], 1)),
       brouterUrl: String(ride["brouterUrl"] ?? "https://brouter.de/brouter"),
+      field: parseField(ride["field"], budgetHours, num(ride["speedKmh"], 16)),
     },
     gtfs: {
       url: String(gtfs.url ?? ""),
@@ -149,6 +151,21 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
 function num(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseField(
+  value: unknown,
+  budgetHours: number,
+  speedKmh: number,
+): { spacingKm: number; radiusKm: number } {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const radius = num(raw["radiusKm"], 0);
+  return {
+    spacingKm: Math.max(1, num(raw["spacingKm"], 20)),
+    // Zero means "as far as the budget could possibly take you", which is the
+    // whole area where a contour could matter.
+    radiusKm: radius > 0 ? radius : Math.min(250, budgetHours * speedKmh),
+  };
 }
 
 function parseVariants(value: unknown, file: string): VariantSpec[] {

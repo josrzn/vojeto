@@ -20,7 +20,7 @@
   },
   "ride": {
     "$comment": "budgetHours is the whole outing including the train. minHours drops rides too short to be worth the fare. maxDays 1 is a there-and-back day; raise it for overnight trips.",
-    "budgetHours": 8,
+    "budgetHours": 10,
     "maxDays": 1,
     "hoursPerDay": 6,
     "speedKmh": 16,
@@ -44,7 +44,12 @@
       }
     ],
     "brouterUrl": "https://brouter.de/brouter",
-    "minHours": 3
+    "minHours": 3,
+    "field": {
+      "$comment": "The continuous ride-time-home map. Costs one BRouter request per sample, so it is opt-in: run `npm run plan -- --field`. radiusKm 0 derives it from budgetHours.",
+      "spacingKm": 20,
+      "radiusKm": 0
+    }
   },
   "gtfs": {
     "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",

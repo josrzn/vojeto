@@ -22,6 +22,7 @@ export function App() {
   const [variantId, setVariantId] = useState<string | null>(null);
   const [openCorridors, setOpenCorridors] = useState<Set<string>>(new Set());
   const [showMisses, setShowMisses] = useState(false);
+  const [showField, setShowField] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,11 +240,38 @@ export function App() {
           destinations={corridors.flatMap((c) => c.destinations)}
           selected={selected}
           variant={activeVariant}
+          frontierHours={
+            chosen ? settings.budgetHours - chosen.travelMinutes / 60 : null
+          }
+          showField={showField && load.plan.field !== null}
           onSelect={(id) => {
             setSelected(id);
             setVariantId(null);
           }}
         />
+
+        {load.plan.field && (
+          <div className="field-key">
+            <label>
+              <input
+                type="checkbox"
+                checked={showField}
+                onChange={(e) => setShowField(e.target.checked)}
+              />
+              ride time home
+            </label>
+            <p>
+              Green rings are hours of riding back from any point. Dots are
+              stations — the only places the train can drop you.
+            </p>
+            {chosen && (
+              <p className="field-key-frontier">
+                Dashed: {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} left
+                after the train to {chosen.name}. Anywhere inside it, you could ride home.
+              </p>
+            )}
+          </div>
+        )}
         {chosen && (
           <TripDetail
             destination={chosen}

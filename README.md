@@ -233,6 +233,7 @@ Useful flags (after `--`):
 | `--feed <path>` | Use a local `.zip` or extracted directory instead of downloading. |
 | `--explain-routes` | List every route label and whether the filter kept it. |
 | `--skip-bike` | Train results only, no BRouter calls. Fast. |
+| `--field` | Also sample ride time home on a grid, for the contour backdrop. |
 | `--limit <n>` | Only route the `n` nearest destinations home. |
 | `--brouter <url>` | Route against a different BRouter instance. |
 | `--max-age-hours <n>` | Re-download the feed if the cached copy is older than this. |
@@ -243,7 +244,7 @@ Useful flags (after `--`):
 | --- | --- |
 | `src/gtfs/` | Download the feed, stream-parse the CSV, filter to TER by stop kind, measure the usable date range, build a routable index of stop patterns. |
 | `src/router/raptor.ts` | RAPTOR. Run once per morning departure from home, keeping the best journey per station that lands inside the arrival window. |
-| `src/bike/` | BRouter client (disk-cached), the effort model that turns distance and climb into hours, and the ride planner: variants, day splits, bail-out stations. |
+| `src/bike/` | BRouter client (disk-cached), the effort model that turns distance and climb into hours, the ride planner (variants, day splits, bail-out stations), and the ride-time field with its marching-squares contours. |
 | `src/build/` | Pick a date per month, run both halves, keep what fits the budget, emit `public/data/plan.json`. |
 | `web/` | React + MapLibre front end. Reads only `plan.json`, so the built site is fully static. |
 

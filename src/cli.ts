@@ -6,6 +6,8 @@ import { formatDate } from "./gtfs/time.js";
 import { buildPlan, writePlan } from "./build/buildPlan.js";
 import { resolveHome, searchStations } from "./build/stations.js";
 import { sampleDates } from "./build/dates.js";
+import { sampleRideField, sampleCount } from "./bike/field.js";
+import type { Grid } from "./bike/contour.js";
 
 const DATA_DIR = "data";
 const FEED_FILE = path.join(DATA_DIR, "sncf-gtfs.zip");
@@ -17,6 +19,7 @@ interface Flags {
   rest: string[];
   explainRoutes: boolean;
   skipBike: boolean;
+  field: boolean;
   limit: number | undefined;
   feed: string | undefined;
   brouter: string | undefined;
@@ -29,6 +32,7 @@ function parseArgs(argv: string[]): Flags {
     rest: [],
     explainRoutes: false,
     skipBike: false,
+    field: false,
     limit: undefined,
     feed: undefined,
     brouter: undefined,
@@ -38,6 +42,7 @@ function parseArgs(argv: string[]): Flags {
     const arg = argv[i]!;
     if (arg === "--explain-routes") flags.explainRoutes = true;
     else if (arg === "--skip-bike") flags.skipBike = true;
+    else if (arg === "--field") flags.field = true;
     else if (arg === "--limit") flags.limit = Number(argv[++i]);
     else if (arg === "--feed") flags.feed = argv[++i];
     else if (arg === "--brouter") flags.brouter = argv[++i];
@@ -119,9 +124,37 @@ async function main(): Promise<void> {
         explainRoutes: flags.explainRoutes,
       });
       if (flags.brouter) config.ride.brouterUrl = flags.brouter;
+
+      let field: Grid | null = null;
+      if (flags.field && !flags.skipBike) {
+        const { spacingKm, radiusKm } = config.ride.field;
+        const requests = sampleCount(radiusKm, spacingKm);
+        console.log(
+          `\nSampling ride time home every ${spacingKm} km out to ${radiusKm.toFixed(0)} km: ` +
+            `${requests} routing requests (about ${Math.ceil(requests / 60)} min uncached)`,
+        );
+        let lastReport = 0;
+        field = await sampleRideField(config.home.rideTo, {
+          baseUrl: config.ride.brouterUrl,
+          cacheDir: CACHE_DIR,
+          profile: config.ride.variants[0]?.profile ?? "trekking",
+          effort: config.ride.effort,
+          radiusKm,
+          spacingKm,
+          onProgress: (done, total) => {
+            if (done - lastReport < 50 && done !== total) return;
+            lastReport = done;
+            console.log(`  field: ${done}/${total}`);
+          },
+        });
+        const known = field.values.filter((v) => v !== null).length;
+        console.log(`  field: ${known} of ${field.values.length} samples reachable by bike`);
+      }
+
       const plan = await buildPlan(index, config, {
         cacheDir: CACHE_DIR,
         skipBike: flags.skipBike,
+        field,
         ...(flags.limit !== undefined ? { limit: flags.limit } : {}),
       });
       await writePlan(plan, PLAN_FILE);
@@ -144,6 +177,7 @@ async function main(): Promise<void> {
         "  --brouter <url>      route against another BRouter, e.g. a local instance",
           "  --explain-routes     list every route label and whether the filter kept it",
           "  --skip-bike          train results only, no BRouter calls",
+        "  --field              also sample ride time home on a grid, for the map backdrop",
           "  --limit <n>          only route the n nearest destinations home",
           "  --max-age-hours <n>  re-download the feed if the cached copy is older",
         ].join("\n"),
