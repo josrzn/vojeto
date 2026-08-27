@@ -105,6 +105,82 @@ export function grades(profile: RouteProfile): number[] {
   return out;
 }
 
+/**
+ * The band for each sample, as something you can actually look at.
+ *
+ * Banding the raw per-sample gradient produces noise, not information: where
+ * the gradient hovers near a threshold, consecutive samples fall either side of
+ * it and the chart fills with alternating stripes across ground that rides as
+ * one continuous slope. Two things fix that, and both are about honesty rather
+ * than tidiness — a hundred-metre sample is simply too short to answer "is this
+ * a climb":
+ *
+ * - the gradient is averaged over `window` samples before banding, so the band
+ *   describes a stretch of road rather than one step;
+ * - runs shorter than `minRun` are absorbed into what precedes them, so a
+ *   momentary excursion over a threshold does not become a stripe.
+ */
+export function bandSeries(
+  grades: number[],
+  { window = 5, minRun = 3 }: { window?: number; minRun?: number } = {},
+): number[] {
+  if (grades.length === 0) return [];
+
+  const half = Math.floor(window / 2);
+  const bands = grades.map((_, i) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(grades.length - 1, i + half); j++) {
+      sum += grades[j]!;
+      count++;
+    }
+    return gradeBand(sum / count);
+  });
+
+  // Merge away runs too short to be worth a colour change. Done on the runs
+  // themselves rather than by walking the samples: a single forward pass is
+  // order-dependent and leaves stripes behind when every run is short, which is
+  // exactly the case this exists to handle.
+  interface Run {
+    band: number;
+    length: number;
+  }
+  const runs: Run[] = [];
+  for (const band of bands) {
+    const last = runs.at(-1);
+    if (last && last.band === band) last.length++;
+    else runs.push({ band, length: 1 });
+  }
+
+  for (;;) {
+    if (runs.length < 2) break;
+    let shortest = -1;
+    for (let i = 0; i < runs.length; i++) {
+      if (runs[i]!.length >= minRun) continue;
+      if (shortest < 0 || runs[i]!.length < runs[shortest]!.length) shortest = i;
+    }
+    if (shortest < 0) break;
+
+    // Fold into whichever neighbour is the more established.
+    const before = runs[shortest - 1];
+    const after = runs[shortest + 1];
+    const into = !before ? after! : !after ? before : after.length > before.length ? after : before;
+    into.length += runs[shortest]!.length;
+    runs.splice(shortest, 1);
+
+    // The splice may have brought two runs of the same band together.
+    for (let i = runs.length - 1; i > 0; i--) {
+      if (runs[i]!.band !== runs[i - 1]!.band) continue;
+      runs[i - 1]!.length += runs[i]!.length;
+      runs.splice(i, 1);
+    }
+  }
+
+  const out: number[] = [];
+  for (const run of runs) for (let i = 0; i < run.length; i++) out.push(run.band);
+  return out;
+}
+
 /** Rounds for shipping: 5 decimals of position is ~1 m, elevation to the metre. */
 export function compact(profile: RouteProfile): RouteProfile {
   return {

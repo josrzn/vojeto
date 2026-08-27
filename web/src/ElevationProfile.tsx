@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { GRADE_COLORS, GRADE_LABELS, gradeBand, type LoadedProfile } from "./grade.js";
+import { GRADE_COLORS, GRADE_LABELS, bandSeries, gradeBand, type LoadedProfile } from "./grade.js";
 
 interface Props {
   profile: LoadedProfile;
@@ -8,7 +8,7 @@ interface Props {
 }
 
 const WIDTH = 320;
-const HEIGHT = 96;
+const HEIGHT = 118;
 const PAD = { top: 8, right: 6, bottom: 16, left: 30 };
 
 /** Rounded, human tick steps for the elevation axis. */
@@ -38,21 +38,46 @@ export function ElevationProfile({ profile, onHover }: Props) {
     const x = (km: number) => PAD.left + (km / totalKm) * plotW;
     const y = (ele: number) => PAD.top + plotH - ((ele - yLo) / (yHi - yLo)) * plotH;
 
-    // One path per band, so the whole line is five strokes rather than hundreds.
-    const byBand: string[] = GRADE_COLORS.map(() => "");
+    // One path per band for the line and one for the fill, so the whole chart
+    // is ten paths rather than hundreds. The fill is what carries the reading:
+    // the area is the largest thing on screen, so it is the channel that must
+    // encode gradient, not a flat wash that makes an easy ride look hard.
+    //
+    // Contiguous samples in the same band become a single polygon. Emitting one
+    // quad per sample instead leaves a hairline seam at every shared edge where
+    // the fills antialias against each other, which reads as vertical banding
+    // across ground that is actually uniform.
+    const base = PAD.top + plotH;
+    const lineByBand: string[] = GRADE_COLORS.map(() => "");
+    const areaByBand: string[] = GRADE_COLORS.map(() => "");
+
+    // Banded once for the whole series, so a stretch keeps one colour instead
+    // of flickering wherever the gradient brushes a threshold.
+    const bands = bandSeries(profile.grade);
+
+    let runStart = 1;
+    const closeRun = (from: number, to: number, band: number) => {
+      const top = [];
+      for (let i = from - 1; i <= to; i++) {
+        top.push(`${x(profile.km[i]!).toFixed(2)},${y(profile.ele[i]!).toFixed(2)}`);
+      }
+      areaByBand[band] +=
+        `M${x(profile.km[from - 1]!).toFixed(2)},${base.toFixed(2)}` +
+        top.map((p) => `L${p}`).join("") +
+        `L${x(profile.km[to]!).toFixed(2)},${base.toFixed(2)}Z`;
+      lineByBand[band] += `M${top.join("L")}`;
+    };
+
     for (let i = 1; i < profile.km.length; i++) {
-      const band = gradeBand(profile.grade[i] ?? 0);
-      byBand[band] +=
-        `M${x(profile.km[i - 1]!).toFixed(2)},${y(profile.ele[i - 1]!).toFixed(2)}` +
-        `L${x(profile.km[i]!).toFixed(2)},${y(profile.ele[i]!).toFixed(2)}`;
+      const band = bands[i] ?? 0;
+      const next = i + 1 < profile.km.length ? (bands[i + 1] ?? 0) : -1;
+      if (band !== next) {
+        closeRun(runStart, i, band);
+        runStart = i + 1;
+      }
     }
 
-    const area =
-      `M${x(0).toFixed(2)},${(PAD.top + plotH).toFixed(2)}` +
-      profile.km.map((km, i) => `L${x(km).toFixed(2)},${y(profile.ele[i]!).toFixed(2)}`).join("") +
-      `L${x(totalKm).toFixed(2)},${(PAD.top + plotH).toFixed(2)}Z`;
-
-    return { x, y, area, byBand, totalKm, yLo, yHi, plotH, plotW };
+    return { x, y, areaByBand, lineByBand, totalKm, yLo, yHi, plotH, plotW };
   }, [profile]);
 
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -105,9 +130,13 @@ export function ElevationProfile({ profile, onHover }: Props) {
           </g>
         ))}
 
-        <path d={geometry.area} className="profile-area" clipPath={`url(#${clipId})`} />
+        <g clipPath={`url(#${clipId})`}>
+          {geometry.areaByBand.map((d, band) =>
+            d ? <path key={band} d={d} fill={GRADE_COLORS[band]} className="profile-area" /> : null,
+          )}
+        </g>
 
-        {geometry.byBand.map((d, band) =>
+        {geometry.lineByBand.map((d, band) =>
           d ? <path key={band} d={d} stroke={GRADE_COLORS[band]} className="profile-line" /> : null,
         )}
 
@@ -166,7 +195,10 @@ export function ElevationProfile({ profile, onHover }: Props) {
       <ul className="grade-key">
         {GRADE_LABELS.map((label, band) => (
           <li key={label}>
-            <span className="grade-swatch" style={{ background: GRADE_COLORS[band] }} />
+            <span
+              className="grade-swatch"
+              style={{ background: GRADE_COLORS[band], color: GRADE_COLORS[band] }}
+            />
             {label}
           </li>
         ))}

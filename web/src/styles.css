@@ -405,8 +405,9 @@ code {
 .profile-tick-start { text-anchor: start; }
 .profile-tick-end { text-anchor: end; }
 
-/* A wash, so the banded line above it stays the thing you read. */
-.profile-area { fill: #d03b3b; fill-opacity: 0.1; }
+/* Held well back so the whole chart stays light: the eye should pick out the
+   few dark stripes, not read a solid block of colour as effort. */
+.profile-area { fill-opacity: 0.28; stroke: none; }
 .profile-line { fill: none; stroke-width: 2; stroke-linecap: round; }
 .profile-crosshair { stroke: #898781; stroke-width: 1; }
 .profile-dot { stroke: #ffffff; stroke-width: 2; }
@@ -431,8 +432,13 @@ code {
   color: var(--ink-soft);
 }
 .grade-key li { display: flex; align-items: center; gap: 0.25rem; }
+/* Mirrors the chart: a held-back fill under a solid top edge. The fill is
+   faded with a colour-mix rather than element opacity, which would have washed
+   out the top edge too and made the dark bands indistinguishable. */
 .grade-swatch {
-  width: 14px;
-  height: 3px;
+  width: 16px;
+  height: 9px;
   border-radius: 2px;
+  background-color: color-mix(in srgb, currentColor 28%, #ffffff) !important;
+  border-top: 2px solid currentColor;
 }

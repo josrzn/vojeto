@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bandSeries,
   compact,
   gradeBand,
   grades,
@@ -147,5 +148,45 @@ describe("compact", () => {
   it("rounds to about a metre of position and whole metres of height", () => {
     const { points } = compact({ step: 100, points: [[4.123456789, 46.987654321, 210.4]] });
     expect(points[0]).toEqual([4.12346, 46.98765, 210]);
+  });
+});
+
+describe("bandSeries", () => {
+  it("does not stripe a slope that merely wobbles across a threshold", () => {
+    // Hovering either side of 1%: raw banding alternates on every sample.
+    const wobble = Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? 0.9 : 1.1));
+    const raw = wobble.map(gradeBand);
+    expect(new Set(raw).size).toBe(2);
+
+    const bands = bandSeries(wobble);
+    expect(new Set(bands).size).toBe(1);
+  });
+
+  it("still reports a climb that genuinely persists", () => {
+    const grades = [...Array(20).fill(0), ...Array(20).fill(7)];
+    const bands = bandSeries(grades);
+    expect(bands[2]).toBe(0);
+    expect(bands.at(-1)).toBe(3);
+  });
+
+  it("absorbs a brief excursion but not a sustained one", () => {
+    const brief = [...Array(20).fill(0), 8, 8, ...Array(20).fill(0)];
+    expect(new Set(bandSeries(brief, { window: 1, minRun: 4 })).size).toBe(1);
+
+    const sustained = [...Array(20).fill(0), ...Array(10).fill(8), ...Array(20).fill(0)];
+    expect(new Set(bandSeries(sustained, { window: 1, minRun: 4 })).size).toBe(2);
+  });
+
+  it("cuts the number of colour changes on a real-shaped profile", () => {
+    // A rolling gradient that crosses thresholds repeatedly.
+    const rolling = Array.from({ length: 300 }, (_, i) => 3 + 2.6 * Math.sin(i / 4));
+    const runs = (bands: number[]) =>
+      bands.reduce((n, b, i) => (i > 0 && b !== bands[i - 1] ? n + 1 : n), 1);
+    expect(runs(bandSeries(rolling))).toBeLessThan(runs(rolling.map(gradeBand)));
+  });
+
+  it("returns one band per sample, and nothing for nothing", () => {
+    expect(bandSeries([1, 2, 3])).toHaveLength(3);
+    expect(bandSeries([])).toEqual([]);
   });
 });

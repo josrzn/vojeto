@@ -1,4 +1,4 @@
-import { GRADE_BANDS, gradeBand } from "../../src/bike/profile.js";
+import { GRADE_BANDS, bandSeries, gradeBand } from "../../src/bike/profile.js";
 
 /**
  * Gradient bands as an ordinal ramp: one hue, light to dark, so steepness is
@@ -20,7 +20,7 @@ export const GRADE_LABELS = [
   `${GRADE_BANDS[3]}%+`,
 ] as const;
 
-export { gradeBand };
+export { gradeBand, bandSeries };
 
 export interface LoadedProfile {
   /** Cumulative distance in km at each sample. */

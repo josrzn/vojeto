@@ -8,7 +8,7 @@ import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 import { contourFeatures } from "../../src/bike/contour.js";
-import { GRADE_COLORS, gradeBand, type LoadedProfile } from "./grade.js";
+import { GRADE_COLORS, bandSeries, type LoadedProfile } from "./grade.js";
 
 interface Props {
   plan: Plan;
@@ -539,8 +539,9 @@ export function MapView({
         return;
       }
 
+      const bands = profile ? bandSeries(profile.grade) : null;
       routeSource.setData(
-        profile
+        profile && bands
           ? {
               type: "FeatureCollection",
               // One feature per band rather than per segment: five multi-line
@@ -553,7 +554,7 @@ export function MapView({
                   coordinates: profile.at
                     .slice(1)
                     .map((point, i) => [profile.at[i]!, point])
-                    .filter((_, i) => gradeBand(profile.grade[i + 1] ?? 0) === band),
+                    .filter((_, i) => (bands[i + 1] ?? 0) === band),
                 },
               })).filter((f) => f.geometry.coordinates.length > 0),
             }

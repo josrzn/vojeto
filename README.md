@@ -316,6 +316,16 @@ ordinal ramp, light to dark, so steepness reads as depth of colour rather than a
 change of hue. Flat and downhill take a recessive grey: climbing is what costs
 you. Every band is labelled, so nothing rests on colour alone.
 
+The band colours the **area**, not just the line. The area is the largest thing
+on screen, so it has to be the channel that encodes gradient; a flat wash under
+a thin coloured line makes an easy ride look uniformly hard.
+
+Bands describe a stretch of road rather than a single sample. The gradient is
+averaged over several samples before banding and short runs are merged away,
+because banding the raw hundred-metre gradient produces stripes wherever it
+brushes a threshold — noise, not information, across ground that rides as one
+continuous slope. The hover readout still shows the unsmoothed figure.
+
 The map splits warm from cool: **the bike is red** (the ride, and the gradient
 ramp that shades it) and **the train is blue**. Stations are green; home is
 plain ink, being an anchor rather than a series.
