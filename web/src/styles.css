@@ -43,6 +43,48 @@ code {
   grid-template-columns: minmax(300px, 25%) 1fr;
   height: 100%;
 }
+/* One column, not `0 1fr`: the hidden panel leaves the grid entirely, so the
+   stage would auto-place into the zero-width first column and vanish. */
+.layout.is-collapsed { grid-template-columns: 1fr; }
+
+.panel-toggle {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.panel-toggle:hover { border-color: #b9c4d1; color: var(--ink); }
+
+.panel-reopen {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 2;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgb(27 36 48 / 10%);
+}
+.panel-reopen:hover { color: var(--ink); }
+
+/* `display: flex` from a class outranks the user agent's [hidden] rule, so
+   hiding the panel has to be said explicitly. */
+.sidebar[hidden] { display: none; }
 
 .sidebar {
   display: flex;
@@ -52,7 +94,7 @@ code {
   border-right: 1px solid var(--line);
 }
 
-.masthead { padding: 1.25rem 1.25rem 0.75rem; }
+.masthead { position: relative; padding: 1.25rem 2.4rem 0.75rem 1.25rem; }
 .masthead h1 { margin: 0 0 0.35rem; font-size: 1.15rem; letter-spacing: -0.01em; }
 .masthead p { margin: 0; font-size: 0.85rem; color: var(--ink-soft); }
 
@@ -95,7 +137,11 @@ code {
   min-height: 0;
 }
 
-.corridor + .corridor { margin-top: 0.15rem; }
+.corridor + .corridor {
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+}
 
 .corridor-head {
   display: grid;
@@ -113,14 +159,23 @@ code {
 .corridor-head:hover { background: var(--panel); }
 .corridor-head.is-active { background: var(--panel); }
 
-.corridor-caret { color: #93a1b0; font-size: 0.75rem; line-height: 1.4; }
-.corridor-name { font-weight: 600; font-size: 0.86rem; }
-.corridor-range { grid-column: 2; font-size: 0.74rem; color: #93a1b0; }
+/* A section label, not an item. It previously sat at the same weight and
+   almost the same size as a station name, so the grouping read as noise
+   instead of structure. */
+.corridor-caret { color: #b6bcc4; font-size: 0.65rem; line-height: 1.5; }
+.corridor-name {
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8794a1;
+}
+.corridor-range { grid-column: 2; font-size: 0.7rem; color: #b6bcc4; }
 
 .results {
   list-style: none;
-  margin: 0.15rem 0 0.5rem;
-  padding: 0 0 0 1.4rem;
+  margin: 0.1rem 0 0.4rem;
+  padding: 0 0 0 0.35rem;
 }
 
 .result {
@@ -247,13 +302,27 @@ code {
   padding: 0.65rem 0.8rem 0.7rem;
   box-shadow: 0 6px 18px rgb(27 36 48 / 10%);
 }
-.field-key h3 {
+.field-key-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0;
   margin: 0 0 0.45rem;
+  font: inherit;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: #93a1b0;
+  cursor: pointer;
 }
+.field-key-head:hover { color: var(--ink); }
+.field-key.is-shut {
+  width: auto;
+  padding: 0.45rem 0.7rem;
+}
+.field-key.is-shut .field-key-head { margin-bottom: 0; }
 
 .key {
   list-style: none;

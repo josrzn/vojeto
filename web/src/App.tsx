@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Plan } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
 import type { LoadedProfile } from "./grade.js";
@@ -29,6 +29,27 @@ function describeAge(generatedAt: string): string {
   return `${Math.round(hours / 24)} days ago`;
 }
 
+/** Remembers a panel's open state between visits; never fatal if unavailable. */
+function useRemembered(key: string, fallback: boolean) {
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored === null ? fallback : stored === "1";
+    } catch {
+      return fallback;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, value ? "1" : "0");
+    } catch {
+      // A private window, or storage disabled. The preference simply does not
+      // outlive the session.
+    }
+  }, [key, value]);
+  return [value, setValue] as const;
+}
+
 type Load =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -45,6 +66,9 @@ export function App() {
   const [showNoTrain, setShowNoTrain] = useState(false);
   const [showFrontier, setShowFrontier] = useState(false);
   const [profile, setProfile] = useState<LoadedProfile | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useRemembered("vojeto.sidebar", true);
+  const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
+  const selectedRow = useRef<HTMLLIElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -121,6 +145,12 @@ export function App() {
     [plan, month],
   );
 
+  // Selection usually comes from clicking the map, so bring the matching row
+  // into view rather than leaving it somewhere down an unscrolled list.
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selected]);
+
   // Keep the selection only while it exists in the month being shown.
   useEffect(() => {
     if (!selected) return;
@@ -166,9 +196,18 @@ export function App() {
     });
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
+    <div className={sidebarOpen ? "layout" : "layout is-collapsed"}>
+      <aside className="sidebar" hidden={!sidebarOpen}>
         <header className="masthead">
+          <button
+            type="button"
+            className="panel-toggle"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Hide the list"
+            title="Hide the list"
+          >
+            ⟨
+          </button>
           <h1>Train out, bike back</h1>
           <p>
             From <strong>{home.station.name}</strong>, off the train by{" "}
@@ -223,13 +262,15 @@ export function App() {
                   <ul className="results">
                     {corridor.destinations.map((destination) => {
                       const ride = bestVariant(rides[destination.stationId]);
+                      const isSelected = destination.stationId === selected;
                       return (
-                        <li key={destination.stationId}>
+                        <li
+                          key={destination.stationId}
+                          ref={isSelected ? selectedRow : null}
+                        >
                           <button
                             type="button"
-                            className={
-                              destination.stationId === selected ? "result is-selected" : "result"
-                            }
+                            className={isSelected ? "result is-selected" : "result"}
                             onClick={() => {
                               setSelected(destination.stationId);
                               setVariantId(null);
@@ -302,6 +343,16 @@ export function App() {
       </aside>
 
       <main className="stage">
+        {!sidebarOpen && (
+          <button
+            type="button"
+            className="panel-reopen"
+            onClick={() => setSidebarOpen(true)}
+            title="Show the list"
+          >
+            ⟩ {stationCount} destinations
+          </button>
+        )}
         <MapView
           plan={load.plan}
           destinations={corridors.flatMap((c) => c.destinations)}
@@ -320,9 +371,17 @@ export function App() {
           }}
         />
 
-        <div className="field-key">
-          <h3>What you are looking at</h3>
+        <div className={keyOpen ? "field-key" : "field-key is-shut"}>
+          <button
+            type="button"
+            className="field-key-head"
+            onClick={() => setKeyOpen((open) => !open)}
+            aria-expanded={keyOpen}
+          >
+            {keyOpen ? "▾" : "▸"} What you are looking at
+          </button>
 
+          {keyOpen && (
           <ul className="key">
             <li>
               <span className="swatch swatch-train" /> train out, through the stops it
@@ -373,8 +432,9 @@ export function App() {
               </li>
             )}
           </ul>
+          )}
 
-          {chosen && activeVariant && (
+          {keyOpen && chosen && activeVariant && (
             <p className="key-note">
               <strong>{chosen.name}</strong>: {formatHours(chosen.travelMinutes / 60)} on the
               train leaves {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} for

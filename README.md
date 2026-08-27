@@ -293,6 +293,10 @@ the legend. This is the most direct answer to "why can't I get to X": Moulins
 sits well inside the riding contours, so the bike was never the obstacle — it
 simply has no morning train from Roanne.
 
+The list on the left and the key at bottom right both collapse, and remember it
+between visits — the map is usually what you want the room for. Selecting a
+station on the map scrolls the list to it.
+
 Selecting a station also draws the train out (through the stops it calls at —
 the feed ships no `shapes.txt`, so this is not the track alignment), the ride
 home, and optionally a dashed contour at `budgetHours - train time`.
