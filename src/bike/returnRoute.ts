@@ -26,6 +26,14 @@ export interface RideVariant {
   id: string;
   label: string;
   profile: string;
+  /**
+   * Which of this profile's routes this is, quickest first, counting from 1.
+   *
+   * What the label shows. Distinct from `alternative`, which records only which
+   * request produced it.
+   */
+  rank: number;
+  /** BRouter's `alternativeidx`, kept for tracing a route back to its request. */
   alternative: number;
   km: number;
   ascentMetres: number;
@@ -117,30 +125,36 @@ export async function planRidesHome(
   stations: Array<Point & { stationId: string; name: string }>,
   options: RideOptions,
 ): Promise<RideResult> {
-  const variants: RideVariant[] = [];
+  const unique: RideVariant[] = [];
   const failures: RideResult["failures"] = [];
 
   for (const spec of options.variants) {
+    const routed: Array<Omit<RideVariant, "id" | "rank">> = [];
     for (let alternative = 0; alternative < Math.max(1, options.alternatives); alternative++) {
-      const id = alternative === 0 ? spec.id : `${spec.id}-${alternative + 1}`;
       try {
-        variants.push(
-          await planOne(from, home, stations, options, spec, alternative, id),
-        );
+        routed.push(await planOne(from, home, stations, options, spec, alternative));
       } catch (error) {
-        failures.push({ id, reason: error instanceof Error ? error.message : String(error) });
+        failures.push({
+          id: spec.id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
-  }
 
-  // Two alternatives from one profile are often the same road; drop repeats.
-  const unique: RideVariant[] = [];
-  for (const variant of variants) {
-    const duplicate = unique.some(
-      (kept) =>
-        kept.profile === variant.profile && Math.abs(kept.km - variant.km) < 0.05,
+    // Two alternatives from one profile are often the same road; drop repeats.
+    const kept = routed.filter(
+      (variant, i) => !routed.slice(0, i).some((other) => Math.abs(other.km - variant.km) < 0.05),
     );
-    if (!duplicate) unique.push(variant);
+
+    // Numbered by how long they take, so "Gravel" is the quickest way home on
+    // gravel and "Gravel 2" is the longer one. BRouter's `alternativeidx` is a
+    // request parameter, not a fact about the road: its first answer is not
+    // more canonical than its second, and letting it number the list means the
+    // label contradicts the order the list is sorted in.
+    kept.sort((a, b) => a.hours - b.hours);
+    for (const [i, variant] of kept.entries()) {
+      unique.push({ ...variant, rank: i + 1, id: i === 0 ? spec.id : `${spec.id}-${i + 1}` });
+    }
   }
 
   unique.sort((a, b) => Number(b.feasible) - Number(a.feasible) || a.hours - b.hours);
@@ -154,8 +168,7 @@ async function planOne(
   options: RideOptions,
   spec: VariantSpec,
   alternative: number,
-  id: string,
-): Promise<RideVariant> {
+): Promise<Omit<RideVariant, "id" | "rank">> {
   const track = await routeBike([from, home], {
     baseUrl: options.baseUrl,
     cacheDir: options.cacheDir,
@@ -209,7 +222,6 @@ async function planOne(
   }
 
   return {
-    id,
     label: spec.label,
     profile: spec.profile,
     alternative,

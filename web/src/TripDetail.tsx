@@ -95,7 +95,7 @@ export function TripDetail({
               >
                 <span className="variant-label">
                   {variant.label}
-                  {variant.alternative > 0 && ` ${variant.alternative + 1}`}
+                  {variant.rank > 1 && ` ${variant.rank}`}
                 </span>
                 <span className="variant-figures">
                   {Math.round(variant.km)} km · {formatHours(variant.hours)}

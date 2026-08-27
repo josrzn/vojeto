@@ -30,6 +30,7 @@ const variant = (km: number, feasible = true, id = "trekking"): PlanRideVariant 
   id,
   label: "Quiet roads",
   profile: "trekking",
+  rank: 1,
   alternative: 0,
   km,
   ascentMetres: 400,

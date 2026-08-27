@@ -14,15 +14,20 @@ import { cumulativeDistances, haversine } from "../src/shared/geo.js";
 const LYON = { lat: 45.7605, lon: 4.86 };
 const ROANNE = { lat: 46.0389, lon: 4.0656 };
 
-/** A straight-ish line from Lyon to Roanne with a hill in the middle. */
-function fakeTrack(points = 400): { geojson: string; coordinates: number[][] } {
+/**
+ * A straight-ish line from Lyon to Roanne with a hill in the middle.
+ *
+ * `detour` bows it sideways, which is how one alternative is made longer than
+ * another without changing either end.
+ */
+function fakeTrack(points = 400, detour = 0): { geojson: string; coordinates: number[][] } {
   const coordinates: number[][] = [];
   for (let i = 0; i < points; i++) {
     const t = i / (points - 1);
     const altitude = 200 + Math.round(600 * Math.sin(Math.PI * t));
     coordinates.push([
       LYON.lon + (ROANNE.lon - LYON.lon) * t,
-      LYON.lat + (ROANNE.lat - LYON.lat) * t,
+      LYON.lat + (ROANNE.lat - LYON.lat) * t + detour * Math.sin(Math.PI * t),
       altitude,
     ]);
   }
@@ -48,6 +53,12 @@ let baseUrl: string;
 let cacheDir: string;
 let requests = 0;
 let respondWith: string | null = null;
+/**
+ * When set, each `alternativeidx` gets a different line — and the earlier the
+ * index, the longer the way round. BRouter really does answer like this
+ * sometimes, and it is the case the numbering has to survive.
+ */
+let varyByAlternative = false;
 
 beforeAll(async () => {
   const { geojson } = fakeTrack();
@@ -56,6 +67,14 @@ beforeAll(async () => {
     if (respondWith !== null) {
       res.writeHead(500, { "Content-Type": "text/plain" });
       res.end(respondWith);
+      return;
+    }
+    if (varyByAlternative) {
+      const idx = Number(
+        new URL(req.url ?? "/", "http://stub").searchParams.get("alternativeidx") ?? 0,
+      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(fakeTrack(400, (2 - idx) * 0.04).geojson);
       return;
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -146,6 +165,28 @@ describe("planRidesHome", () => {
     });
     expect(result.variants.map((v) => v.id)).toEqual(["trekking", "fast"]);
     expect(result.failures).toEqual([]);
+  });
+
+  it("numbers a profile's routes by duration, not by BRouter's index", async () => {
+    // The stub makes alternativeidx 0 the long way round, so the quicker route
+    // is the one BRouter offered second. It should still be the unnumbered one:
+    // `alternativeidx` is a request parameter, not a ranking.
+    const isolated = await mkdtemp(path.join(tmpdir(), "vojeto-rank-"));
+    varyByAlternative = true;
+    const result = await ride({ cacheDir: isolated, alternatives: 2 });
+    varyByAlternative = false;
+    await rm(isolated, { recursive: true, force: true });
+
+    const [first, second] = result.variants;
+    expect(first!.hours).toBeLessThan(second!.hours);
+
+    expect(first!.rank).toBe(1);
+    expect(first!.id).toBe("trekking");
+    expect(first!.alternative).toBe(1);
+
+    expect(second!.rank).toBe(2);
+    expect(second!.id).toBe("trekking-2");
+    expect(second!.alternative).toBe(0);
   });
 
   it("drops an alternative that retraces the same road", async () => {

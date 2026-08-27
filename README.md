@@ -159,10 +159,13 @@ Each profile is requested `alternatives` times, using BRouter's
 Identical results are dropped, and each is checked against the budget
 separately — a gravel route can be too slow for a day when the direct one fits.
 
-**The list is ordered quickest first**, not grouped by profile. So "Direct 2"
-can sit ahead of "Direct" — the second alternative for a profile is not a
-fallback, and often comes out a few minutes faster than the first. Routes that
-overrun the budget sort to the end.
+**The list is ordered quickest first**, not grouped by profile, and routes that
+overrun the budget sort to the end. Within a profile the routes are numbered the
+same way: "Gravel" is the quickest way home on gravel and "Gravel 2" the longer
+one. BRouter's `alternativeidx` does not decide that — it is a request
+parameter, not a fact about the road, and its first answer is often the slower
+of the two. The exported `.gpx` is named for the same number, so what you
+downloaded is what you clicked.
 
 #### What a profile actually is
 
