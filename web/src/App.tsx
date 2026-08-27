@@ -450,6 +450,10 @@ export function App() {
             variants={variants}
             active={activeVariant}
             profile={profile}
+            effort={{
+              speedKmh: settings.speedKmh,
+              climbMetresPerHour: settings.climbMetresPerHour,
+            }}
             onHoverProfile={setHoverIndex}
             onPickVariant={setVariantId}
             onClose={() => setSelected(null)}

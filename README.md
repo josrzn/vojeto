@@ -342,6 +342,27 @@ Two things the numbers cannot do:
   default), not between the router's own points, which are spaced by OSM nodes
   and would each cover a different distance.
 
+### Distance or time along the bottom
+
+The chart plots against distance by default. The `time` switch above it replots
+the same ride against riding time instead, using the same model as every other
+duration in the app: `ride.effort.speedKmh` for the distance, plus
+`ride.effort.climbMetresPerHour` for whatever the segment climbs.
+
+The point of it is that a climb's *width* becomes its duration. On a distance
+axis a 3 km wall and 3 km of valley floor take the same width while costing very
+different amounts of the day; on a time axis climbs stretch, descents compress,
+and the shape of the chart is the shape of the effort. Faint dashed hour lines
+give you something to measure against.
+
+It is a second reading of one ride, not a second opinion. The axis is scaled to
+end exactly on the duration shown above it: the profile is resampled and
+smoothed, so it accumulates slightly less ascent than the full-resolution track
+the stated figure comes from, and an axis ending somewhere the panel contradicts
+would be worse than a scaled one. Descents cost their distance and nothing more
+— the model has no notion of gaining time downhill, which is roughly true of
+a loaded touring bike and not at all true of a racer.
+
 Profiles are written to `public/data/profiles/`, one small file per ride
 (~10 KB), fetched only when you look at that ride.
 

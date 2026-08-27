@@ -123,3 +123,25 @@ export function maxRideKm(trainHours: number, budget: Budget, model: EffortModel
   const laterDays = Math.max(0, budget.maxDays - 1) * budget.hoursPerDay;
   return (firstDay + laterDays) * model.speedKmh;
 }
+
+/**
+ * Riding time elapsed at each sample of a profile, in hours.
+ *
+ * The same model as `rideHours`, applied step by step: a segment costs its
+ * distance at the flat speed, plus whatever it climbs. Descents cost their
+ * distance and nothing else — the model has no notion of going faster downhill,
+ * so a descent is cheap rather than free.
+ *
+ * Monotonically increasing by construction, which is what makes it usable as an
+ * axis. The last value equals `rideHours` over the same totals, so a chart drawn
+ * against it ends where the ride's stated duration says it should.
+ */
+export function elapsedHours(km: number[], ele: number[], model: EffortModel): number[] {
+  const out = [0];
+  for (let i = 1; i < km.length; i++) {
+    const run = Math.max(0, (km[i] ?? 0) - (km[i - 1] ?? 0));
+    const rise = Math.max(0, (ele[i] ?? 0) - (ele[i - 1] ?? 0));
+    out.push(out[i - 1]! + rideHours(run, rise, model));
+  }
+  return out;
+}

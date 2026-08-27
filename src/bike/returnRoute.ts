@@ -1,7 +1,14 @@
 import type { TimetableIndex } from "../shared/types.js";
 import { cumulativeDistances, haversine, nearest, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
-import { fitsBudget, rideHours, type Budget, type EffortModel, type Verdict } from "./effort.js";
+import {
+  elapsedHours,
+  fitsBudget,
+  rideHours,
+  type Budget,
+  type EffortModel,
+  type Verdict,
+} from "./effort.js";
 
 export interface BailoutStation {
   stationId: string;
@@ -220,19 +227,23 @@ async function planOne(
   };
 }
 
-/** Cumulative hours of effort at each vertex, by the same model as rideHours. */
+/**
+ * Cumulative hours of effort at each vertex, by the same model as rideHours.
+ *
+ * An adapter onto `elapsedHours`, which the profile chart's time axis also uses:
+ * where a day ends and where the chart puts a climb are the same question asked
+ * of different point spacings, and they should not be able to disagree.
+ */
 function cumulativeEffort(
   coordinates: number[][],
   distances: number[],
   model: EffortModel,
 ): number[] {
-  const hours = new Array<number>(coordinates.length).fill(0);
-  for (let i = 1; i < coordinates.length; i++) {
-    const km = (distances[i]! - distances[i - 1]!) / 1000;
-    const climb = Math.max(0, (coordinates[i]![2] ?? 0) - (coordinates[i - 1]![2] ?? 0));
-    hours[i] = hours[i - 1]! + rideHours(km, climb, model);
-  }
-  return hours;
+  return elapsedHours(
+    distances.map((metres) => metres / 1000),
+    coordinates.map((vertex) => vertex[2] ?? 0),
+    model,
+  );
 }
 
 /** Running total of hours at which each day should end. */

@@ -1,3 +1,4 @@
+import type { EffortModel } from "../../src/bike/effort.js";
 import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 import { formatHours } from "./corridors.js";
@@ -9,6 +10,8 @@ interface Props {
   variants: PlanRideVariant[];
   active: PlanRideVariant | null;
   profile: LoadedProfile | null;
+  /** Passed through to the profile, which can plot against riding time. */
+  effort: EffortModel;
   onHoverProfile: (index: number | null) => void;
   onPickVariant: (id: string) => void;
   onClose: () => void;
@@ -19,6 +22,7 @@ export function TripDetail({
   variants,
   active,
   profile,
+  effort,
   onHoverProfile,
   onPickVariant,
   onClose,
@@ -107,7 +111,14 @@ export function TripDetail({
                 {formatHours(active.hours)} riding
                 {active.days > 1 && ` · ${active.days} days`}
               </p>
-              {profile && <ElevationProfile profile={profile} onHover={onHoverProfile} />}
+              {profile && (
+                <ElevationProfile
+                  profile={profile}
+                  effort={effort}
+                  totalHours={active.hours}
+                  onHover={onHoverProfile}
+                />
+              )}
               {active.gpx && (
                 <p className="detail-export">
                   <a href={`./data/gpx/${active.gpx}`} download>

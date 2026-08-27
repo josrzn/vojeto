@@ -473,6 +473,41 @@ code {
 }
 .profile-tick-start { text-anchor: start; }
 .profile-tick-end { text-anchor: end; }
+.profile-tick-mid { text-anchor: middle; }
+
+/* Fainter than the elevation grid: these are a ruler for reading widths, not
+   a second reading of their own. */
+.profile-hourline {
+  stroke: #c3c2b7;
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* Distance first, and left looking like the resting state: the time axis is a
+   second way of looking at the same ride, not an equal alternative. */
+.profile-axis-pick {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  margin-bottom: 0.15rem;
+}
+.axis-pick {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font: inherit;
+  font-size: 0.68rem;
+  color: #93a1b0;
+  cursor: pointer;
+}
+.axis-pick:hover:not(:disabled) { color: var(--ink); }
+.axis-pick.is-active {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--ink);
+}
+.axis-pick:disabled { opacity: 0.4; cursor: default; }
 
 /* Held well back so the whole chart stays light: the eye should pick out the
    few dark stripes, not read a solid block of colour as effort. */
