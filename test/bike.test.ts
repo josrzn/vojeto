@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { curveFromLinearModel } from "../src/bike/speed.js";
+import { rideHours } from "../src/bike/effort.js";
+import { resampleByDistance, smoothElevation } from "../src/bike/profile.js";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -74,7 +77,8 @@ const options = (overrides: Partial<RideOptions> = {}): RideOptions => ({
   throttleMs: 0,
   variants: [{ id: "trekking", label: "Quiet roads", profile: "trekking" }],
   alternatives: 1,
-  effort: { speedKmh: 16, climbMetresPerHour: 600 },
+  effort: { curve: curveFromLinearModel(16, 600) },
+  profileStepMetres: 100,
   budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6, minHours: 0 },
   trainHours: 1,
   ...overrides,
@@ -165,11 +169,35 @@ describe("planRidesHome", () => {
     expect(result.failures[0]?.reason).toMatch(/profile not found/);
   });
 
-  it("estimates hours from distance and climb, not from BRouter", async () => {
+  it("times the ride off the shape of the ground, not off BRouter", async () => {
     const [variant] = (await ride()).variants;
-    // 612 m of ascent at 600 m/h is just over an hour on top of the flat time.
-    expect(variant!.hours).toBeCloseTo(variant!.km / 16 + 612 / 600, 5);
     expect(variant!.brouterHours).toBeCloseTo(5, 5);
+    expect(variant!.hours).not.toBeCloseTo(variant!.brouterHours, 2);
+
+    // Reproducible from the track: resample, smooth, integrate the curve. This
+    // is the same pipeline the browser runs for the profile chart's time axis.
+    const distances = cumulativeDistances(variant!.track);
+    const step = 100;
+    const points = smoothElevation(resampleByDistance(variant!.track, step).points, 3);
+    const expected = rideHours(
+      points.map((_, i) => Math.min(i * step, distances.at(-1)!) / 1000),
+      points.map((point) => point[2] ?? 0),
+      { curve: curveFromLinearModel(16, 600) },
+    );
+    expect(variant!.hours).toBeCloseTo(expected, 9);
+  });
+
+  it("reports the ascent it actually charged for", async () => {
+    // Not BRouter's own 612 m: the duration is integrated over the smoothed
+    // profile, so the ascent shown beside it has to come from the same series
+    // or the two numbers describe different rides.
+    const [variant] = (await ride()).variants;
+    const points = smoothElevation(resampleByDistance(variant!.track, 100).points, 3);
+    let ascent = 0;
+    for (let i = 1; i < points.length; i++) {
+      ascent += Math.max(0, (points[i]![2] ?? 0) - (points[i - 1]![2] ?? 0));
+    }
+    expect(variant!.ascentMetres).toBe(Math.round(ascent));
   });
 
   it("marks a ride that fits the remaining budget", async () => {

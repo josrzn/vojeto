@@ -2,9 +2,12 @@ import type { Grid } from "./contour.js";
 import { haversine, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
 import { rideHours, type EffortModel } from "./effort.js";
+import { resampleByDistance, smoothElevation } from "./profile.js";
 
 export interface FieldOptions extends Omit<BRouterOptions, "alternative"> {
   effort: EffortModel;
+  /** Spacing the sampled routes are resampled at before timing, in metres. */
+  profileStepMetres: number;
   /** Half-width of the sampled square, in km. */
   radiusKm: number;
   /** Distance between samples, in km. Cost grows with the square of this. */
@@ -83,9 +86,16 @@ export async function sampleRideField(home: Point, options: FieldOptions): Promi
           // single refusal punches a hole through every contour near it.
           track = await route();
         }
+        // Timed the same way a real ride home is, off an evenly resampled and
+        // smoothed profile: a field built on a different estimate than the
+        // station routes would draw contours the destinations sit wrong inside.
+        const points = smoothElevation(
+          resampleByDistance(track.coordinates, options.profileStepMetres).points,
+          3,
+        );
         values[row * cols + col] = rideHours(
-          track.metres / 1000,
-          track.ascentMetres,
+          points.map((_, i) => Math.min(i * options.profileStepMetres, track.metres) / 1000),
+          points.map((point) => point[2] ?? 0),
           options.effort,
         );
         sampled++;

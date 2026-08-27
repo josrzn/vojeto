@@ -141,6 +141,7 @@ async function main(): Promise<void> {
           cacheDir: CACHE_DIR,
           profile: config.ride.variants[0]?.profile ?? "trekking",
           effort: config.ride.effort,
+          profileStepMetres: config.ride.profileStepMetres,
           radiusKm,
           spacingKm,
           onProgress: (done, total) => {

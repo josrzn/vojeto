@@ -6,7 +6,7 @@
       "query": "Roanne",
       "stopId": null
     },
-    "rideTo": "46\u00b002'03.80\"N 4\u00b004'45.63\"E"
+    "rideTo": "46°02'03.80\"N 4°04'45.63\"E"
   },
   "trip": {
     "arriveBy": "09:00",
@@ -23,8 +23,85 @@
     "budgetHours": 10,
     "maxDays": 1,
     "hoursPerDay": 6,
-    "speedKmh": 16,
-    "climbMetresPerHour": 600,
+    "$speedComment": "speedByGradient is how fast you ride at each gradient, in percent. Speed depends on gradient in a way one flat speed plus one climbing rate cannot express: it has no descending in it at all. Anchors are interpolated, and held flat past either end. Replace these with your own numbers — what you actually hold at 5%, and how fast you really come down. Everything the app calls a duration comes from this list.",
+    "speedByGradient": [
+      [
+        -20,
+        20
+      ],
+      [
+        -14,
+        27
+      ],
+      [
+        -9,
+        31
+      ],
+      [
+        -6,
+        32
+      ],
+      [
+        -4,
+        30
+      ],
+      [
+        -2,
+        24
+      ],
+      [
+        -1,
+        20
+      ],
+      [
+        0,
+        16
+      ],
+      [
+        1,
+        13
+      ],
+      [
+        2,
+        11
+      ],
+      [
+        3,
+        9.5
+      ],
+      [
+        4,
+        8.6
+      ],
+      [
+        5,
+        8
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        8,
+        5.3
+      ],
+      [
+        10,
+        4.3
+      ],
+      [
+        12,
+        3.7
+      ],
+      [
+        15,
+        3.3
+      ],
+      [
+        20,
+        2.8
+      ]
+    ],
     "alternatives": 2,
     "variants": [
       {

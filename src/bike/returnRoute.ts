@@ -1,14 +1,8 @@
 import type { TimetableIndex } from "../shared/types.js";
 import { cumulativeDistances, haversine, nearest, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
-import {
-  elapsedHours,
-  fitsBudget,
-  rideHours,
-  type Budget,
-  type EffortModel,
-  type Verdict,
-} from "./effort.js";
+import { resampleByDistance, smoothElevation } from "./profile.js";
+import { elapsedHours, fitsBudget, type Budget, type EffortModel, type Verdict } from "./effort.js";
 
 export interface BailoutStation {
   stationId: string;
@@ -76,6 +70,15 @@ export interface RideOptions extends Omit<BRouterOptions, "profile" | "alternati
   trainHours: number;
   /** A station further than this from an overnight stop is not a useful escape. */
   maxBailoutKm?: number;
+  /**
+   * Spacing the route is resampled at before it is timed, in metres.
+   *
+   * Matters now that speed depends on gradient: gradient taken between the
+   * router's own vertices, which can be metres apart, is mostly noise off the
+   * elevation model, and a curve turns noise into time. Same value the shipped
+   * profile uses, so the chart and the duration are the same calculation.
+   */
+  profileStepMetres: number;
 }
 
 export interface RideResult {
@@ -167,12 +170,9 @@ async function planOne(
   const totalMetres = distances.at(-1) ?? 0;
   const km = totalMetres / 1000;
 
-  const effortHours = cumulativeEffort(track.coordinates, distances, options.effort);
-  const totalHours = effortHours.at(-1) ?? 0;
-  // The headline figure uses BRouter's filtered ascent, which is steadier than
-  // summing raw per-vertex elevation deltas; the per-segment totals above are
-  // only used to decide where the days should break.
-  const hours = rideHours(km, track.ascentMetres, options.effort);
+  const shape = profileOf(track.coordinates, options.profileStepMetres, totalMetres);
+  const effortHours = elapsedHours(shape.km, shape.ele, options.effort);
+  const hours = effortHours.at(-1) ?? 0;
   const verdict = fitsBudget(options.trainHours, hours, options.budget);
 
   const boundaries = dayBoundaries(hours, options.trainHours, options.budget, verdict.days);
@@ -185,7 +185,7 @@ async function planOne(
     const vertex =
       day === boundaries.length - 1
         ? track.coordinates.length - 1
-        : vertexAtEffort(effortHours, (untilHours / hours) * totalHours);
+        : vertexAtDistance(distances, interpolate(effortHours, shape.km, untilHours) * 1000);
     const end: Point = {
       lon: track.coordinates[vertex]![0]!,
       lat: track.coordinates[vertex]![1]!,
@@ -194,7 +194,8 @@ async function planOne(
       day: day + 1,
       km: (distances[vertex]! - distances[previousVertex]!) / 1000,
       ascentMetres: Math.round(
-        track.ascentMetres * fraction(effortHours, previousVertex, vertex, totalHours),
+        interpolate(shape.km, shape.ascent, distances[vertex]! / 1000) -
+          interpolate(shape.km, shape.ascent, distances[previousVertex]! / 1000),
       ),
       hours: untilHours - previousHours,
       end,
@@ -213,7 +214,7 @@ async function planOne(
     profile: spec.profile,
     alternative,
     km,
-    ascentMetres: track.ascentMetres,
+    ascentMetres: Math.round(shape.ascent.at(-1) ?? 0),
     hours,
     brouterHours: track.estimatedSeconds / 3600,
     days: verdict.days,
@@ -228,22 +229,57 @@ async function planOne(
 }
 
 /**
- * Cumulative hours of effort at each vertex, by the same model as rideHours.
+ * The shape of the route, at even spacing, as three series along it.
  *
- * An adapter onto `elapsedHours`, which the profile chart's time axis also uses:
- * where a day ends and where the chart puts a climb are the same question asked
- * of different point spacings, and they should not be able to disagree.
+ * The same resample-then-smooth the browser is sent, so the duration here and
+ * the chart there are one calculation rather than two that happen to agree. The
+ * router's raw vertices cannot be used for this: they are spaced by OSM node,
+ * so a gradient taken between two of them is as much an artefact of where a road
+ * happens to bend as of the hill, and a speed curve charges real time for that.
+ *
+ * Distances are along the road — the resampler lands on exact multiples of the
+ * step — rather than straight lines between samples, which would quietly lose a
+ * little length on every bend.
  */
-function cumulativeEffort(
+function profileOf(
   coordinates: number[][],
-  distances: number[],
-  model: EffortModel,
-): number[] {
-  return elapsedHours(
-    distances.map((metres) => metres / 1000),
-    coordinates.map((vertex) => vertex[2] ?? 0),
-    model,
-  );
+  stepMetres: number,
+  totalMetres: number,
+): { km: number[]; ele: number[]; ascent: number[] } {
+  const resampled = resampleByDistance(coordinates, stepMetres);
+  const points = smoothElevation(resampled.points, 3);
+  const km = points.map((_, i) => Math.min(i * stepMetres, totalMetres) / 1000);
+  const ele = points.map((point) => point[2] ?? 0);
+  const ascent = [0];
+  for (let i = 1; i < ele.length; i++) {
+    ascent.push(ascent[i - 1]! + Math.max(0, ele[i]! - ele[i - 1]!));
+  }
+  return { km, ele, ascent };
+}
+
+/**
+ * Reads `ys` at the point where `xs` reaches `x`, interpolating between samples.
+ *
+ * `xs` must increase. Used both ways round — hours to distance for a day
+ * boundary, distance to ascent for a stage total — which is why it is written
+ * as a lookup rather than as either.
+ */
+function interpolate(xs: number[], ys: number[], x: number): number {
+  if (xs.length === 0) return 0;
+  if (x <= xs[0]!) return ys[0]!;
+  const last = xs.length - 1;
+  if (x >= xs[last]!) return ys[last]!;
+
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >>> 1;
+    if (xs[mid]! <= x) lo = mid;
+    else hi = mid;
+  }
+  const span = xs[hi]! - xs[lo]!;
+  const t = span > 0 ? (x - xs[lo]!) / span : 0;
+  return ys[lo]! + (ys[hi]! - ys[lo]!) * t;
 }
 
 /** Running total of hours at which each day should end. */
@@ -263,18 +299,18 @@ function dayBoundaries(
   return boundaries;
 }
 
-function fraction(effortHours: number[], from: number, to: number, total: number): number {
-  if (total <= 0) return 0;
-  return (effortHours[to]! - effortHours[from]!) / total;
-}
-
-/** First vertex at or past `hours` of cumulative effort. */
-function vertexAtEffort(effortHours: number[], hours: number): number {
+/**
+ * First vertex of the raw track at or past `metres` along it.
+ *
+ * Days are decided on the resampled profile but have to end at a real point on
+ * the line, because that is what a bailout station is measured from.
+ */
+function vertexAtDistance(distances: number[], metres: number): number {
   let low = 0;
-  let high = effortHours.length - 1;
+  let high = distances.length - 1;
   while (low < high) {
     const mid = (low + high) >>> 1;
-    if (effortHours[mid]! < hours) low = mid + 1;
+    if (distances[mid]! < metres) low = mid + 1;
     else high = mid;
   }
   return low;

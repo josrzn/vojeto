@@ -145,9 +145,18 @@ describe("smoothElevation", () => {
 });
 
 describe("compact", () => {
-  it("rounds to about a metre of position and whole metres of height", () => {
-    const { points } = compact({ step: 100, points: [[4.123456789, 46.987654321, 210.4]] });
-    expect(points[0]).toEqual([4.12346, 46.98765, 210]);
+  it("rounds to about a metre of position and a tenth of one of height", () => {
+    const { points } = compact({ step: 100, points: [[4.123456789, 46.987654321, 210.44]] });
+    expect(points[0]).toEqual([4.12346, 46.98765, 210.4]);
+  });
+
+  it("keeps enough height precision that gradients do not move in whole percent", () => {
+    // A hundred-metre step rising 0.34 m is a 0.34% gradient. Rounded to the
+    // metre it is either 0% or 1%, and the speed curve charges differently for
+    // those; a tenth of a metre keeps it inside a tenth of a percent.
+    const { points } = compact({ step: 100, points: [[0, 0, 100], [0, 0, 100.34]] });
+    const gradient = ((points[1]![2]! - points[0]![2]!) / 100) * 100;
+    expect(Math.abs(gradient - 0.34)).toBeLessThan(0.1);
   });
 });
 

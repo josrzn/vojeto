@@ -68,11 +68,11 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
 
   // Where you are in the ride, in hours, at every sample.
   //
-  // Scaled so the last value is the duration shown everywhere else for this
-  // ride. The two differ a little because this is computed from the profile —
-  // resampled every hundred metres and smoothed against DEM noise — which does
-  // not accumulate quite the same ascent as the full-resolution track. Left
-  // unscaled, the axis would end at a time the panel above it contradicts.
+  // The same calculation the plan ran: this profile is the one the duration was
+  // integrated over, so the two agree to within the rounding that shipping it
+  // costs. Scaled onto the stated total anyway, because an axis ending at a
+  // time the panel above it contradicts would be worse than a scaled one, and
+  // because it keeps the chart honest if the plan is older than the code.
   const elapsed = useMemo(() => {
     const raw = elapsedHours(profile.km, profile.ele, effort);
     const last = raw.at(-1) ?? 0;

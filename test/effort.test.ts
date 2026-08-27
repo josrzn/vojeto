@@ -1,21 +1,61 @@
 import { describe, expect, it } from "vitest";
 import { fitsBudget, maxRideKm, rideHours, type Budget, type EffortModel } from "../src/bike/effort.js";
+import { curveFromLinearModel, flatKmh } from "../src/bike/speed.js";
 
-const model: EffortModel = { speedKmh: 16, climbMetresPerHour: 600 };
+const model: EffortModel = { curve: curveFromLinearModel(16, 600) };
+
+/** A profile of `km` at a steady gradient, as the model now wants its input. */
+const slope = (km: number, ascentMetres: number) => ({
+  km: [0, km],
+  ele: [0, ascentMetres],
+});
+const hoursFor = (km: number, ascentMetres: number, m: EffortModel = model) => {
+  const { km: xs, ele } = slope(km, ascentMetres);
+  return rideHours(xs, ele, m);
+};
 const dayTrip: Budget = { budgetHours: 6, maxDays: 1, hoursPerDay: 6, minHours: 0 };
 
 describe("rideHours", () => {
-  it("adds a climbing allowance to the flat time", () => {
-    expect(rideHours(48, 0, model)).toBeCloseTo(3, 6);
-    expect(rideHours(48, 600, model)).toBeCloseTo(4, 6);
-  });
-
   it("treats a flat route as pure distance", () => {
-    expect(rideHours(80, 0, model)).toBeCloseTo(5, 6);
+    expect(hoursFor(80, 0)).toBeCloseTo(5, 6);
+    expect(hoursFor(48, 0)).toBeCloseTo(3, 6);
   });
 
-  it("ignores climbing when the allowance is switched off", () => {
-    expect(rideHours(48, 1200, { speedKmh: 16, climbMetresPerHour: 0 })).toBeCloseTo(3, 6);
+  it("charges for climbing", () => {
+    // 48 km gaining 600 m is a steady 1.25%, well under the flat speed.
+    expect(hoursFor(48, 600)).toBeGreaterThan(hoursFor(48, 0));
+  });
+
+  it("reproduces the old flat-plus-climbing model it was derived from", () => {
+    // curveFromLinearModel exists so an old config keeps its numbers: 48 km and
+    // 600 m of climb was exactly 4 hours at 16 km/h plus 600 m/h. The curve
+    // interpolates between anchors, so it is close rather than equal — the
+    // promise is "within half a percent", not "identical".
+    expect(hoursFor(48, 600)).toBeCloseTo(4, 1);
+    expect(Math.abs(hoursFor(48, 600) - 4) / 4).toBeLessThan(0.005);
+  });
+
+  it("stays within half a percent of the old model across real gradients", () => {
+    for (let gradient = 0; gradient <= 12; gradient += 0.25) {
+      const km = 20;
+      const exact = km / 16 + (10 * gradient * km) / 600;
+      expect(Math.abs(hoursFor(km, 10 * gradient * km) - exact) / exact).toBeLessThan(0.005);
+    }
+  });
+
+  it("is faster downhill than on the flat, which the old model never was", () => {
+    const curve = { curve: curveFromLinearModel(16, 600) };
+    // The derived curve inherits the old model's flat descents...
+    expect(hoursFor(48, -600, curve)).toBeCloseTo(hoursFor(48, 0, curve), 6);
+    // ...while a curve with real descending speeds does not.
+    const descends: EffortModel = {
+      curve: [
+        { gradient: -5, kmh: 30 },
+        { gradient: 0, kmh: 16 },
+        { gradient: 5, kmh: 8 },
+      ],
+    };
+    expect(hoursFor(48, -600, descends)).toBeLessThan(hoursFor(48, 0, descends));
   });
 });
 
@@ -130,12 +170,20 @@ describe("fitsBudget reporting the budget a trip would need", () => {
 });
 
 describe("maxRideKm", () => {
+  // The bound carries deliberate slack, so these check what it is for — that it
+  // sits above the flat-speed distance — rather than pinning its exact value.
   it("bounds a day trip by the hours left after the train", () => {
-    expect(maxRideKm(1, dayTrip, model)).toBeCloseTo(80, 6);
+    // 1h on the train leaves 5h, which is 80 km at 16 km/h.
+    const bound = maxRideKm(1, dayTrip, model);
+    expect(bound).toBeGreaterThanOrEqual(80);
+    expect(bound).toBeLessThan(80 * 1.25);
   });
 
   it("adds the later days when multi-day is allowed", () => {
-    expect(maxRideKm(1, { budgetHours: 6, maxDays: 3, hoursPerDay: 6, minHours: 0 }, model)).toBeCloseTo(272, 6);
+    // 5h on day one plus two more days of 6h: 17h, or 272 km on the flat.
+    const bound = maxRideKm(1, { budgetHours: 6, maxDays: 3, hoursPerDay: 6, minHours: 0 }, model);
+    expect(bound).toBeGreaterThanOrEqual(272);
+    expect(bound).toBeLessThan(272 * 1.25);
   });
 
   it("is zero when the train already exhausts the budget", () => {
@@ -143,11 +191,14 @@ describe("maxRideKm", () => {
   });
 
   it("never bounds below what fitsBudget would accept", () => {
-    // The bound ignores climbing, so it must not be tighter than the real check.
+    // The bound is deliberately generous, so a flat ride of exactly that length
+    // must still be rejected only by the budget, never by the bound.
     for (const trainHours of [0.5, 1, 2, 3]) {
       const km = maxRideKm(trainHours, dayTrip, model);
-      expect(fitsBudget(trainHours, rideHours(km, 0, model), dayTrip).feasible).toBe(true);
-      expect(fitsBudget(trainHours, rideHours(km + 1, 0, model), dayTrip).feasible).toBe(false);
+      const flatRide = km / flatKmh(model.curve);
+      expect(flatRide).toBeGreaterThan(dayTrip.budgetHours - trainHours);
+      const longestThatFits = (dayTrip.budgetHours - trainHours) * flatKmh(model.curve);
+      expect(km).toBeGreaterThanOrEqual(longestThatFits);
     }
   });
 });

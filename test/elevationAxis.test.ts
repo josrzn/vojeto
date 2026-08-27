@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { hourTicks, indexAtFraction } from "../web/src/ElevationProfile.js";
-import { elapsedHours } from "../src/bike/effort.js";
+import { elapsedHours, type EffortModel } from "../src/bike/effort.js";
+import { TOURING_CURVE, curveFromLinearModel, speedAt } from "../src/bike/speed.js";
 
-const model = { speedKmh: 16, climbMetresPerHour: 600 };
+const legacy: EffortModel = { curve: curveFromLinearModel(16, 600) };
+const model: EffortModel = { curve: TOURING_CURVE };
 
 describe("elapsedHours", () => {
   it("starts at zero and never goes backwards", () => {
@@ -13,30 +15,42 @@ describe("elapsedHours", () => {
     for (let i = 1; i < hours.length; i++) expect(hours[i]!).toBeGreaterThan(hours[i - 1]!);
   });
 
-  it("charges for distance and for climbing, but not for descending", () => {
-    const flat = elapsedHours([0, 16], [100, 100], model).at(-1)!;
-    const up = elapsedHours([0, 16], [100, 700], model).at(-1)!;
-    const down = elapsedHours([0, 16], [700, 100], model).at(-1)!;
-    expect(flat).toBeCloseTo(1, 6);
-    expect(up).toBeCloseTo(2, 6);
-    expect(down).toBeCloseTo(1, 6);
+  it("rides a segment at the curve's speed for its gradient", () => {
+    // 10 km at a steady 5%: 500 m of climb over 10 km.
+    const hours = elapsedHours([0, 10], [0, 500], model).at(-1)!;
+    expect(hours).toBeCloseTo(10 / speedAt(TOURING_CURVE, 5), 9);
   });
 
-  it("totals what the ride estimate would give for the same distance and ascent", () => {
-    // 3 km with 90 m of net-up spread over two rises and one dip between them.
-    const km = [0, 1, 2, 3];
-    const ele = [0, 60, 20, 70];
-    // Ascent counted the way the ride estimate counts it: rises only, 60 + 50.
-    const expected = 3 / model.speedKmh + 110 / model.climbMetresPerHour;
-    expect(elapsedHours(km, ele, model).at(-1)!).toBeCloseTo(expected, 9);
+  it("goes faster downhill than on the flat", () => {
+    const flat = elapsedHours([0, 16], [100, 100], model).at(-1)!;
+    const down = elapsedHours([0, 16], [700, 100], model).at(-1)!;
+    const up = elapsedHours([0, 16], [100, 700], model).at(-1)!;
+    expect(flat).toBeCloseTo(1, 6);
+    expect(down).toBeLessThan(flat);
+    expect(up).toBeGreaterThan(flat);
+  });
+
+  it("keeps the old model's numbers when the curve is derived from it", () => {
+    // The old estimate for 16 km climbing 600 m: 1 h of distance, 1 h of climb.
+    expect(elapsedHours([0, 16], [100, 700], legacy).at(-1)!).toBeCloseTo(2, 1);
+    // And it descends at the flat speed, because that model had no descending.
+    expect(elapsedHours([0, 16], [700, 100], legacy).at(-1)!).toBeCloseTo(1, 6);
+  });
+
+  it("charges a rolling road more than the flat road it averages to", () => {
+    // Up 3% for a km then down 3% for a km ends where it started, but the climb
+    // costs far more than the descent gives back. A model that only knew the
+    // net change would call this flat.
+    const rolling = elapsedHours([0, 1, 2], [0, 30, 0], model).at(-1)!;
+    const flat = elapsedHours([0, 2], [0, 0], model).at(-1)!;
+    expect(rolling).toBeGreaterThan(flat);
   });
 
   it("stretches a climb relative to distance", () => {
     // Two 5 km halves, the second one climbing. On a distance axis each takes
     // half the width; on a time axis the climb has to take more.
     const hours = elapsedHours([0, 5, 10], [0, 0, 300], model);
-    const firstShare = hours[1]! / hours[2]!;
-    expect(firstShare).toBeLessThan(0.5);
+    expect(hours[1]! / hours[2]!).toBeLessThan(0.5);
   });
 });
 

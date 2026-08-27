@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Plan } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
 import type { LoadedProfile } from "./grade.js";
+import { curveFromLinearModel, describeCurve } from "../../src/bike/speed.js";
 import { haversine } from "../../src/shared/geo.js";
 import { TripDetail } from "./TripDetail.js";
 import {
@@ -173,6 +174,15 @@ export function App() {
   }
 
   const { settings, home, rides } = load.plan;
+
+  // A plan.json built before speed became a curve carries the two scalars it
+  // used instead. Read them rather than crashing on a missing curve: the page
+  // then shows the numbers that plan was actually built with, which is the
+  // truthful thing to do until it is rebuilt.
+  const legacy = settings as Partial<{ speedKmh: number; climbMetresPerHour: number }>;
+  const curve =
+    settings.speedByGradient ??
+    curveFromLinearModel(legacy.speedKmh ?? 16, legacy.climbMetresPerHour ?? 600);
   const chosen =
     corridors.flatMap((c) => c.destinations).find((d) => d.stationId === selected) ?? null;
   const variants = chosen ? (rides[chosen.stationId] ?? []) : [];
@@ -335,8 +345,8 @@ export function App() {
         )}
 
         <footer className="colophon">
-          Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at {settings.speedKmh} km/h
-          plus {settings.climbMetresPerHour} m climb an hour.
+          Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at{" "}
+          {describeCurve(curve)}.
           {" "}Plan built {describeAge(load.plan.generatedAt)}
           {load.plan.field ? " with a ride-time field." : ", no ride-time field."}
         </footer>
@@ -450,10 +460,7 @@ export function App() {
             variants={variants}
             active={activeVariant}
             profile={profile}
-            effort={{
-              speedKmh: settings.speedKmh,
-              climbMetresPerHour: settings.climbMetresPerHour,
-            }}
+            effort={{ curve }}
             onHoverProfile={setHoverIndex}
             onPickVariant={setVariantId}
             onClose={() => setSelected(null)}

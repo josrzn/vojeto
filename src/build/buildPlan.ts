@@ -9,6 +9,7 @@ import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRo
 import { densify, describeRide, slug, toGpx } from "../bike/gpx.js";
 import { compact, resampleByDistance, smoothElevation } from "../bike/profile.js";
 import { maxRideKm } from "../bike/effort.js";
+import type { SpeedCurve } from "../bike/speed.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
 import { resolveHome, type StationMatch } from "./stations.js";
@@ -87,8 +88,8 @@ export interface Plan {
     minRideHours: number;
     maxDays: number;
     hoursPerDay: number;
-    speedKmh: number;
-    climbMetresPerHour: number;
+    /** The rider's speed against gradient, so the browser times things the same way. */
+    speedByGradient: SpeedCurve;
     maxTransfers: number;
     minTransferMinutes: number;
     maxTransferMinutes: number;
@@ -244,6 +245,7 @@ export async function buildPlan(
         cacheDir: options.cacheDir,
         variants: config.ride.variants,
         alternatives: config.ride.alternatives,
+        profileStepMetres: config.ride.profileStepMetres,
         effort: config.ride.effort,
         budget: config.ride.budget,
         trainHours: target.trainHours,
@@ -334,8 +336,7 @@ export async function buildPlan(
       budgetHours: config.ride.budget.budgetHours,
       maxDays: config.ride.budget.maxDays,
       hoursPerDay: config.ride.budget.hoursPerDay,
-      speedKmh: config.ride.effort.speedKmh,
-      climbMetresPerHour: config.ride.effort.climbMetresPerHour,
+      speedByGradient: config.ride.effort.curve,
       maxTransfers: config.trip.maxTransfers,
       minRideHours: config.ride.budget.minHours,
       minTransferMinutes: config.trip.minTransferSeconds / 60,

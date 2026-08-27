@@ -2,6 +2,13 @@ import { readFile } from "node:fs/promises";
 import { requireTime } from "./gtfs/time.js";
 import { parsePoint, type Point } from "./shared/geo.js";
 import type { Budget, EffortModel } from "./bike/effort.js";
+import {
+  TOURING_CURVE,
+  curveFromLinearModel,
+  flatKmh,
+  validateCurve,
+  type SpeedCurve,
+} from "./bike/speed.js";
 import type { VariantSpec } from "./bike/returnRoute.js";
 
 export interface Config {
@@ -100,6 +107,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
 
   const budgetHours = num(ride["budgetHours"], 6);
   const variants = parseVariants(ride["variants"], file);
+  const curve = parseSpeedCurve(ride, file);
 
   return {
     home: {
@@ -128,14 +136,11 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
         hoursPerDay: num(ride["hoursPerDay"], budgetHours),
         minHours: Math.max(0, num(ride["minHours"], 0)),
       },
-      effort: {
-        speedKmh: num(ride["speedKmh"], 16),
-        climbMetresPerHour: num(ride["climbMetresPerHour"], 600),
-      },
+      effort: { curve },
       variants,
       alternatives: Math.max(1, num(ride["alternatives"], 1)),
       brouterUrl: String(ride["brouterUrl"] ?? "https://brouter.de/brouter"),
-      field: parseField(ride["field"], budgetHours, num(ride["speedKmh"], 16)),
+      field: parseField(ride["field"], budgetHours, flatKmh(curve)),
       profileStepMetres: Math.max(10, num(ride["profileStepMetres"], 100)),
       gpxMaxPointSpacingMetres: Math.max(
         0,
@@ -174,6 +179,40 @@ function parseField(
     // whole area where a contour could matter.
     radiusKm: radius > 0 ? radius : Math.min(250, budgetHours * speedKmh),
   };
+}
+
+/**
+ * The rider's speed curve, from `ride.speedByGradient`.
+ *
+ * A config written before the curve existed keeps working: `ride.speedKmh` and
+ * `ride.climbMetresPerHour` are read instead and turned into the curve they
+ * always implied. That model has no descending in it, so a plan built from an
+ * old config still reports the old, slower times rather than silently changing
+ * every number in it.
+ */
+function parseSpeedCurve(ride: Record<string, unknown>, file: string): SpeedCurve {
+  const raw = ride["speedByGradient"];
+  if (raw === undefined) {
+    if (ride["speedKmh"] === undefined && ride["climbMetresPerHour"] === undefined) {
+      return TOURING_CURVE;
+    }
+    return curveFromLinearModel(num(ride["speedKmh"], 16), num(ride["climbMetresPerHour"], 600));
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`${file}: ride.speedByGradient must be a list of [gradient, km/h] pairs`);
+  }
+  const curve = raw.map((entry, i) => {
+    const where = `${file}: ride.speedByGradient[${i}]`;
+    if (Array.isArray(entry) && entry.length === 2) {
+      return { gradient: Number(entry[0]), kmh: Number(entry[1]) };
+    }
+    if (entry && typeof entry === "object" && "gradient" in entry && "kmh" in entry) {
+      const pair = entry as { gradient: unknown; kmh: unknown };
+      return { gradient: Number(pair.gradient), kmh: Number(pair.kmh) };
+    }
+    throw new Error(`${where}: expected [gradient, km/h] or { gradient, kmh }`);
+  });
+  return validateCurve(curve, `${file}: ride.speedByGradient`);
 }
 
 function parseVariants(value: unknown, file: string): VariantSpec[] {

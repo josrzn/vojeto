@@ -58,17 +58,19 @@ This is the constraint that decides what shows up.
 
 ```json
 "ride": {
-  "budgetHours": 6,
+  "budgetHours": 10,
   "maxDays": 1,
   "hoursPerDay": 6,
-  "speedKmh": 16,
-  "climbMetresPerHour": 600
+  "speedByGradient": [
+    [-20, 20], [-14, 27], [-9, 31], [-6, 32], [-4, 30], [-2, 24], [-1, 20],
+    [0, 16],
+    [1, 13], [2, 11], [3, 9.5], [4, 8.6], [5, 8], [6, 7],
+    [8, 5.3], [10, 4.3], [12, 3.7], [15, 3.3], [20, 2.8]
+  ]
 }
 ```
 
-A destination is kept only if `train out + ride home` fits `budgetHours`. Riding
-time is estimated as `km / speedKmh + ascent / climbMetresPerHour` — the usual
-touring rule, so the numbers move predictably when you change the settings.
+A destination is kept only if `train out + ride home` fits `budgetHours`.
 BRouter's own estimate is shown alongside for comparison but is not used to
 decide anything.
 
@@ -93,6 +95,53 @@ For an overnight trip, raise `maxDays`. Day one gets whatever is left of
 `budgetHours` after the train; each later day gets `hoursPerDay`. The ride is
 then split at those points, and every overnight stop is tagged with the nearest
 station in case you want to give up and take the train.
+
+### How fast you ride
+
+`speedByGradient` is the whole model: pairs of `[gradient in percent, km/h]`,
+interpolated between and held flat past either end. Every duration in the
+project — the feasibility check, the day splitting, the contours, the profile
+chart's time axis — is this list integrated over the shape of the ground.
+
+It replaces the usual touring rule, `km / speedKmh + ascent / climbMetresPerHour`,
+which this project used until it did not survive being written out as a speed:
+
+| gradient | the old rule | the curve above |
+| --- | --- | --- |
+| -10% | 16.0 km/h | 30.2 km/h |
+| -3% | 16.0 km/h | 27.0 km/h |
+| 0% | 16.0 km/h | 16.0 km/h |
+| 3% | 8.9 km/h | 9.5 km/h |
+| 5% | 6.9 km/h | 8.0 km/h |
+| 10% | 4.4 km/h | 4.3 km/h |
+
+Two things are wrong in that left-hand column. There is no descending in it at
+all — you come down a 10% drop at exactly your flat speed — and its rate of
+climbing runs backwards, rising from 126 m/h of ascent at 1% to 480 m/h at 15%,
+where a rider holding a steady effort is closer to flat across the gradients
+roads are actually built at. The curve holds about 420 m/h between 5% and 10%
+and gives way above that as the gearing runs out; downhill it peaks around -6%
+and falls off again, because a steep descent on a loaded bike is ridden on the
+brakes.
+
+Where it changes the answer most is rolling terrain, which is what the Loire and
+the Beaujolais are. An 8 km climb at 6% and the 8 km descent off the other side
+takes 1h48 under the old rule and 1h23 under the curve.
+
+**The numbers shipped are a starting point, not a measurement.** They are a
+loaded tourer on mixed back roads. Replace them with your own — what you really
+hold at 5%, how fast you really come down — and every figure in the app moves
+with them. A config that still has `speedKmh` and `climbMetresPerHour` and no
+`speedByGradient` keeps working: the old rule is turned into the curve it always
+implied, descents and all, so an old plan reports the times it always did rather
+than silently changing.
+
+Because speed now depends on gradient, and gradient over a few metres of road is
+mostly noise off a thirty-metre elevation model, routes are resampled every
+`ride.profileStepMetres` and smoothed before they are timed — the same series the
+browser is sent for the profile chart, so the two cannot disagree. The ascent
+reported beside a ride is measured off that same series rather than taken from
+BRouter, for the same reason.
 
 ### Ways home
 
@@ -203,10 +252,16 @@ reservation, and replacement coaches because they will not take a bike at all.
 Check before you rely on a specific train.
 
 **The ride home is a suggestion.** BRouter knows the road network, not seasonal
-closures, surface condition after rain, or what you find pleasant. Distances and
-ascent come from BRouter; the riding time is this project's own estimate, and
-the "to spare" figure inherits all of that uncertainty. Treat a route with ten
-minutes of slack as a coin flip.
+closures, surface condition after rain, or what you find pleasant. Distance comes
+from BRouter; the ascent and the riding time are this project's own, off your
+speed curve and the smoothed elevation profile, and the "to spare" figure
+inherits all of that uncertainty. Treat a route with ten minutes of slack as a
+coin flip.
+
+**The curve does not know what you are riding on.** Speed depends on gradient
+here and on nothing else, so the same descent is ridden at the same speed on
+tarmac and on a rutted forest track, and a gravel variant is timed as though it
+were a road one. Surface is a real second variable — it is simply not modelled.
 
 **Stations on one line are a difficulty ladder, not duplicates.** Most of what
 comes back from a given home station sits on a handful of lines, and going one
@@ -345,9 +400,8 @@ Two things the numbers cannot do:
 ### Distance or time along the bottom
 
 The chart plots against distance by default. The `time` switch above it replots
-the same ride against riding time instead, using the same model as every other
-duration in the app: `ride.effort.speedKmh` for the distance, plus
-`ride.effort.climbMetresPerHour` for whatever the segment climbs.
+the same ride against riding time instead, using the same `ride.speedByGradient`
+curve as every other duration in the app.
 
 The point of it is that a climb's *width* becomes its duration. On a distance
 axis a 3 km wall and 3 km of valley floor take the same width while costing very
@@ -359,9 +413,8 @@ It is a second reading of one ride, not a second opinion. The axis is scaled to
 end exactly on the duration shown above it: the profile is resampled and
 smoothed, so it accumulates slightly less ascent than the full-resolution track
 the stated figure comes from, and an axis ending somewhere the panel contradicts
-would be worse than a scaled one. Descents cost their distance and nothing more
-— the model has no notion of gaining time downhill, which is roughly true of
-a loaded touring bike and not at all true of a racer.
+would be worse than a scaled one, and because it keeps the chart honest against
+a plan built by an older version of the code.
 
 Profiles are written to `public/data/profiles/`, one small file per ride
 (~10 KB), fetched only when you look at that ride.

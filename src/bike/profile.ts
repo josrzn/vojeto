@@ -181,14 +181,24 @@ export function bandSeries(
   return out;
 }
 
-/** Rounds for shipping: 5 decimals of position is ~1 m, elevation to the metre. */
+/**
+ * Rounds for shipping: 5 decimals of position is about a metre.
+ *
+ * Elevation keeps a decimal, which looks like more precision than a
+ * thirty-metre model can support and is not there for precision. Speed depends
+ * on gradient, and a gradient over a hundred-metre step is the difference of
+ * two elevations: round those to the metre and the gradient moves in jumps of
+ * a whole percent. The jumps are symmetric but the speed curve is not, so a
+ * ride slows by about two thirds of a percent — small, but a bias rather than
+ * noise, and it would land on the browser's numbers alone.
+ */
 export function compact(profile: RouteProfile): RouteProfile {
   return {
     step: profile.step,
     points: profile.points.map((p) => [
       Number(p[0]!.toFixed(5)),
       Number(p[1]!.toFixed(5)),
-      Math.round(p[2] ?? 0),
+      Number((p[2] ?? 0).toFixed(1)),
     ]),
   };
 }
