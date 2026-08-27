@@ -136,6 +136,58 @@ with them. A config that still has `speedKmh` and `climbMetresPerHour` and no
 implied, descents and all, so an old plan reports the times it always did rather
 than silently changing.
 
+### What you are riding on
+
+Gravel is not tarmac, and until recently this timed it as though it were. The
+curves are keyed by surface:
+
+```json
+"speedByGradient": {
+  "paved":   [[-6, 32], [0, 16], [5, 8], [10, 4.3]],
+  "unpaved": [[-6, 20], [0, 13], [5, 7.2], [10, 4]]
+}
+```
+
+Look at where the penalty sits. Loose surface costs you most where you were
+going fastest — the descent that is 32 km/h on tarmac is 20 on gravel, because
+it is ridden on the brakes — and least on a steep climb, where 4 km/h is 4 km/h
+whatever is under the tyre. A single "gravel is twenty percent slower"
+multiplier would flatten exactly the structure worth having.
+
+`paved` is required; `unpaved` and `unknown` fall back to it when left out, so
+writing a plain list instead of the object means one curve for everything and no
+surface modelling at all.
+
+**Where the surface comes from.** BRouter's GeoJSON carries a `messages` table:
+one row per stretch of way, with its length and the OpenStreetMap tags on it.
+Those tags are read, classified, and matched onto the elevation profile sample
+by sample. Nothing extra is fetched — it is in the response already, including
+in responses already sitting in your cache.
+
+Classification is a ladder, because `surface` is missing on a great many rural
+French ways and refusing to guess would make this useless there:
+
+| Rung | What it reads | Example |
+| --- | --- | --- |
+| 1 | `surface`, when recognised | `surface=gravel` → unpaved |
+| 2 | `tracktype` | `grade1` → paved, `grade2`–`grade5` → unpaved |
+| 3 | the kind of road | `highway=residential` → paved, `highway=track` → unpaved |
+
+An untagged `cycleway` or `footway` is taken as surfaced, since an unsigned one
+is usually a made-up route through a town; an untagged `path` is not, since in
+open country it usually is not.
+
+Anything the ladder cannot place is **unknown**, and unknown takes the *road*
+curve. That is deliberate. The pessimistic choice would quietly inflate every
+duration in a region that happens to be thinly mapped, and a slow answer that is
+wrong for a reason you cannot see is worse than a fast one you have been told to
+distrust — so the unrecorded distance is reported in the trip panel instead of
+being priced in.
+
+A server that returns no `messages` at all is not an error: every sample becomes
+unknown, and the plan is the one you would have had before, just with a line
+saying the surface is unrecorded.
+
 Because speed now depends on gradient, and gradient over a few metres of road is
 mostly noise off a thirty-metre elevation model, routes are resampled every
 `ride.profileStepMetres` and smoothed before they are timed — the same series the
@@ -266,10 +318,11 @@ speed curve and the smoothed elevation profile, and the "to spare" figure
 inherits all of that uncertainty. Treat a route with ten minutes of slack as a
 coin flip.
 
-**The curve does not know what you are riding on.** Speed depends on gradient
-here and on nothing else, so the same descent is ridden at the same speed on
-tarmac and on a rutted forest track, and a gravel variant is timed as though it
-were a road one. Surface is a real second variable — it is simply not modelled.
+**Surface is modelled, but the tagging behind it is patchy.** Where OpenStreetMap
+records what a way is made of, the ride is timed on it; where nobody has, the
+stretch is timed at road speed and the panel says how many kilometres that
+covers. Treat a route that is a third unrecorded as a guess with a number
+attached.
 
 **Stations on one line are a difficulty ladder, not duplicates.** Most of what
 comes back from a given home station sits on a handful of lines, and going one

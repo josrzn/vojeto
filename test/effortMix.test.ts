@@ -4,7 +4,7 @@ import { elapsedHours } from "../src/bike/effort.js";
 import { gradeBand } from "../src/bike/profile.js";
 import { TOURING_CURVE } from "../src/bike/speed.js";
 
-const model = { curve: TOURING_CURVE };
+const model = { curves: { paved: TOURING_CURVE, unpaved: TOURING_CURVE, unknown: TOURING_CURVE } };
 
 /** Bands for a profile, the way the chart derives them. */
 const bandsFor = (km: number[], ele: number[]) =>
@@ -40,7 +40,7 @@ describe("shares", () => {
     const bands = bandsFor(km, ele);
 
     const byDistance = shares(bands, km);
-    const byTime = shares(bands, elapsedHours(km, ele, model));
+    const byTime = shares(bands, elapsedHours(km, ele, km.map(() => "paved" as const), model));
 
     expect(byDistance[0]).toBeCloseTo(0.5, 6);
     expect(byTime[0]!).toBeLessThan(0.2);

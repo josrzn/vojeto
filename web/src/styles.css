@@ -240,6 +240,12 @@ code {
 .detail-export a:hover { text-decoration: underline; }
 .detail-export span { color: #93a1b0; font-size: 0.72rem; }
 
+.detail-surface {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: #93a1b0;
+}
+
 .detail-slack { margin: 0.2rem 0 0; font-size: 0.78rem; color: #4c8577; }
 .detail-note { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--bike); }
 

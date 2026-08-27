@@ -17,6 +17,27 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * The unsurfaced share of a ride, and how much of it is a guess.
+ *
+ * Said only when there is something to say: a ride that is all tarmac gets no
+ * line at all rather than "0 km unpaved". Unrecorded surface is called out
+ * separately because it is timed at road speed — if a route is half unrecorded,
+ * its duration is an assumption and you should be told so rather than left to
+ * infer it from a number that looks as solid as the others.
+ */
+function describeSurface(variant: PlanRideVariant) {
+  const surfaceKm = variant.surfaceKm;
+  if (!surfaceKm) return null;
+  const parts: string[] = [];
+  if (surfaceKm.unpaved >= 0.5) parts.push(`${Math.round(surfaceKm.unpaved)} km unpaved`);
+  if (surfaceKm.unknown >= 0.5) {
+    parts.push(`${Math.round(surfaceKm.unknown)} km unrecorded, timed as road`);
+  }
+  if (parts.length === 0) return null;
+  return <p className="detail-surface">{parts.join(" · ")}</p>;
+}
+
 export function TripDetail({
   destination,
   variants,
@@ -111,6 +132,7 @@ export function TripDetail({
                 {formatHours(active.hours)} riding
                 {active.days > 1 && ` · ${active.days} days`}
               </p>
+              {describeSurface(active)}
               {profile && (
                 <ElevationProfile
                   profile={profile}

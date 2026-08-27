@@ -1,4 +1,5 @@
 import { DOWNHILL_BAND, GRADE_BANDS, bandSeries, gradeBand } from "../../src/bike/profile.js";
+import { SURFACES, type Surface } from "../../src/bike/surface.js";
 
 /**
  * Gradient as a diverging scale: climbing on the warm arm, descending on the
@@ -54,9 +55,12 @@ export const DARK_BANDS = new Set([4, 5]);
 
 export { DOWNHILL_BAND };
 
-export { gradeBand, bandSeries };
+export { gradeBand, bandSeries, SURFACES };
+export type { Surface };
 
 export interface LoadedProfile {
+  /** What each sample is riding on, "unknown" where nobody has recorded it. */
+  surface: Surface[];
   /** Cumulative distance in km at each sample. */
   km: number[];
   /** Elevation in metres at each sample. */

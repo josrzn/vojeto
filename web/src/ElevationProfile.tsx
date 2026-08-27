@@ -75,7 +75,7 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
   // time the panel above it contradicts would be worse than a scaled one, and
   // because it keeps the chart honest if the plan is older than the code.
   const elapsed = useMemo(() => {
-    const raw = elapsedHours(profile.km, profile.ele, effort);
+    const raw = elapsedHours(profile.km, profile.ele, profile.surface, effort);
     const last = raw.at(-1) ?? 0;
     if (!Number.isFinite(last) || last <= 0 || !Number.isFinite(totalHours) || totalHours <= 0) {
       return null;

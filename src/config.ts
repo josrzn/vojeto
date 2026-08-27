@@ -3,12 +3,14 @@ import { requireTime } from "./gtfs/time.js";
 import { parsePoint, type Point } from "./shared/geo.js";
 import type { Budget, EffortModel } from "./bike/effort.js";
 import {
-  TOURING_CURVE,
+  TOURING_CURVES,
   curveFromLinearModel,
   flatKmh,
   validateCurve,
   type SpeedCurve,
+  type SpeedCurves,
 } from "./bike/speed.js";
+import { SURFACES } from "./bike/surface.js";
 import type { VariantSpec } from "./bike/returnRoute.js";
 
 export interface Config {
@@ -107,7 +109,7 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
 
   const budgetHours = num(ride["budgetHours"], 6);
   const variants = parseVariants(ride["variants"], file);
-  const curve = parseSpeedCurve(ride, file);
+  const curves = parseSpeedCurves(ride, file);
 
   return {
     home: {
@@ -136,11 +138,11 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
         hoursPerDay: num(ride["hoursPerDay"], budgetHours),
         minHours: Math.max(0, num(ride["minHours"], 0)),
       },
-      effort: { curve },
+      effort: { curves },
       variants,
       alternatives: Math.max(1, num(ride["alternatives"], 1)),
       brouterUrl: String(ride["brouterUrl"] ?? "https://brouter.de/brouter"),
-      field: parseField(ride["field"], budgetHours, flatKmh(curve)),
+      field: parseField(ride["field"], budgetHours, flatKmh(curves.paved)),
       profileStepMetres: Math.max(10, num(ride["profileStepMetres"], 100)),
       gpxMaxPointSpacingMetres: Math.max(
         0,
@@ -181,28 +183,12 @@ function parseField(
   };
 }
 
-/**
- * The rider's speed curve, from `ride.speedByGradient`.
- *
- * A config written before the curve existed keeps working: `ride.speedKmh` and
- * `ride.climbMetresPerHour` are read instead and turned into the curve they
- * always implied. That model has no descending in it, so a plan built from an
- * old config still reports the old, slower times rather than silently changing
- * every number in it.
- */
-function parseSpeedCurve(ride: Record<string, unknown>, file: string): SpeedCurve {
-  const raw = ride["speedByGradient"];
-  if (raw === undefined) {
-    if (ride["speedKmh"] === undefined && ride["climbMetresPerHour"] === undefined) {
-      return TOURING_CURVE;
-    }
-    return curveFromLinearModel(num(ride["speedKmh"], 16), num(ride["climbMetresPerHour"], 600));
-  }
+/** One list of `[gradient, km/h]` pairs, validated. */
+function parseOneCurve(raw: unknown, where: string): SpeedCurve {
   if (!Array.isArray(raw)) {
-    throw new Error(`${file}: ride.speedByGradient must be a list of [gradient, km/h] pairs`);
+    throw new Error(`${where} must be a list of [gradient, km/h] pairs`);
   }
   const curve = raw.map((entry, i) => {
-    const where = `${file}: ride.speedByGradient[${i}]`;
     if (Array.isArray(entry) && entry.length === 2) {
       return { gradient: Number(entry[0]), kmh: Number(entry[1]) };
     }
@@ -210,9 +196,73 @@ function parseSpeedCurve(ride: Record<string, unknown>, file: string): SpeedCurv
       const pair = entry as { gradient: unknown; kmh: unknown };
       return { gradient: Number(pair.gradient), kmh: Number(pair.kmh) };
     }
-    throw new Error(`${where}: expected [gradient, km/h] or { gradient, kmh }`);
+    throw new Error(`${where}[${i}]: expected [gradient, km/h] or { gradient, kmh }`);
   });
-  return validateCurve(curve, `${file}: ride.speedByGradient`);
+  return validateCurve(curve, where);
+}
+
+/**
+ * The rider's speed curves, from `ride.speedByGradient`.
+ *
+ * Three shapes are accepted, and which one you write says how much of the model
+ * you want:
+ *
+ * - absent, with `ride.speedKmh` and `ride.climbMetresPerHour` present — the
+ *   model from before curves existed, converted to the curve it always implied
+ *   and used for every surface, so an old config still reports its old times
+ *   rather than silently changing every number in the plan;
+ * - a plain list — one curve for everything, gradient modelled and surface not;
+ * - an object keyed by surface — the full model. `paved` is required; anything
+ *   omitted falls back to it, so writing only `paved` is the same as writing a
+ *   plain list.
+ */
+function parseSpeedCurves(ride: Record<string, unknown>, file: string): SpeedCurves {
+  const raw = ride["speedByGradient"];
+  const everywhere = (curve: SpeedCurve): SpeedCurves => ({
+    paved: curve,
+    unpaved: curve,
+    unknown: curve,
+  });
+
+  if (raw === undefined) {
+    if (ride["speedKmh"] === undefined && ride["climbMetresPerHour"] === undefined) {
+      return TOURING_CURVES;
+    }
+    return everywhere(
+      curveFromLinearModel(num(ride["speedKmh"], 16), num(ride["climbMetresPerHour"], 600)),
+    );
+  }
+
+  if (Array.isArray(raw)) {
+    return everywhere(parseOneCurve(raw, `${file}: ride.speedByGradient`));
+  }
+
+  if (typeof raw !== "object") {
+    throw new Error(
+      `${file}: ride.speedByGradient must be a list of pairs, or an object keyed by surface`,
+    );
+  }
+
+  const byName = raw as Record<string, unknown>;
+  const unexpected = Object.keys(byName).filter(
+    (key) => !key.startsWith("$") && !SURFACES.includes(key as never),
+  );
+  if (unexpected.length > 0) {
+    throw new Error(
+      `${file}: ride.speedByGradient has no surface named "${unexpected[0]}" ` +
+        `(expected ${SURFACES.join(", ")})`,
+    );
+  }
+  if (byName["paved"] === undefined) {
+    throw new Error(`${file}: ride.speedByGradient needs at least a "paved" curve`);
+  }
+
+  const paved = parseOneCurve(byName["paved"], `${file}: ride.speedByGradient.paved`);
+  const named = (surface: string): SpeedCurve =>
+    byName[surface] === undefined
+      ? paved
+      : parseOneCurve(byName[surface], `${file}: ride.speedByGradient.${surface}`);
+  return { paved, unpaved: named("unpaved"), unknown: named("unknown") };
 }
 
 function parseVariants(value: unknown, file: string): VariantSpec[] {

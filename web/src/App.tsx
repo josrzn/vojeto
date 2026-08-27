@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Plan } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
-import type { LoadedProfile } from "./grade.js";
-import { curveFromLinearModel, describeCurve } from "../../src/bike/speed.js";
+import { SURFACES, type LoadedProfile } from "./grade.js";
+import {
+  curveFromLinearModel,
+  describeCurve,
+  type SpeedCurve,
+  type SpeedCurves,
+} from "../../src/bike/speed.js";
 import { haversine } from "../../src/shared/geo.js";
 import { TripDetail } from "./TripDetail.js";
 import {
@@ -29,6 +34,13 @@ function describeAge(generatedAt: string): string {
   if (hours < 24) return `${hours} h ago`;
   return `${Math.round(hours / 24)} days ago`;
 }
+
+/** One curve used for every surface, which is what a plan without them meant. */
+const everySurface = (curve: SpeedCurve): SpeedCurves => ({
+  paved: curve,
+  unpaved: curve,
+  unknown: curve,
+});
 
 /** Remembers a panel's open state between visits; never fatal if unavailable. */
 function useRemembered(key: string, fallback: boolean) {
@@ -113,7 +125,7 @@ export function App() {
     let cancelled = false;
     fetch(`./data/profiles/${elevationFile}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((raw: { step: number; points: number[][] }) => {
+      .then((raw: { step: number; points: number[][]; surfaces?: number[] }) => {
         if (cancelled) return;
         const km: number[] = [0];
         for (let i = 1; i < raw.points.length; i++) {
@@ -127,7 +139,12 @@ export function App() {
           const run = (km[i]! - km[i - 1]!) * 1000;
           grade.push(run > 0 ? ((ele[i]! - ele[i - 1]!) / run) * 100 : 0);
         }
-        setProfile({ km, ele, grade, at: raw.points.map((p) => [p[0]!, p[1]!]) });
+        // A profile written before surfaces were shipped simply has none, and
+        // "unknown" is exactly what that means.
+        const surface = raw.points.map(
+          (_, i) => SURFACES[raw.surfaces?.[i] ?? -1] ?? "unknown",
+        );
+        setProfile({ km, ele, grade, surface, at: raw.points.map((p) => [p[0]!, p[1]!]) });
       })
       .catch(() => {
         if (!cancelled) setProfile(null);
@@ -180,9 +197,12 @@ export function App() {
   // then shows the numbers that plan was actually built with, which is the
   // truthful thing to do until it is rebuilt.
   const legacy = settings as Partial<{ speedKmh: number; climbMetresPerHour: number }>;
-  const curve =
-    settings.speedByGradient ??
-    curveFromLinearModel(legacy.speedKmh ?? 16, legacy.climbMetresPerHour ?? 600);
+  const shipped: SpeedCurves | SpeedCurve | undefined = settings.speedByGradient;
+  const curves: SpeedCurves = !shipped
+    ? everySurface(curveFromLinearModel(legacy.speedKmh ?? 16, legacy.climbMetresPerHour ?? 600))
+    : Array.isArray(shipped)
+      ? everySurface(shipped as SpeedCurve)
+      : (shipped as SpeedCurves);
   const chosen =
     corridors.flatMap((c) => c.destinations).find((d) => d.stationId === selected) ?? null;
   const variants = chosen ? (rides[chosen.stationId] ?? []) : [];
@@ -346,7 +366,7 @@ export function App() {
 
         <footer className="colophon">
           Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at{" "}
-          {describeCurve(curve)}.
+          {describeCurve(curves.paved)}.
           {" "}Plan built {describeAge(load.plan.generatedAt)}
           {load.plan.field ? " with a ride-time field." : ", no ride-time field."}
         </footer>
@@ -460,7 +480,7 @@ export function App() {
             variants={variants}
             active={activeVariant}
             profile={profile}
-            effort={{ curve }}
+            effort={{ curves }}
             onHoverProfile={setHoverIndex}
             onPickVariant={setVariantId}
             onClose={() => setSelected(null)}

@@ -9,7 +9,8 @@ import { planRidesHome, stationPoints, type RideVariant } from "../bike/returnRo
 import { densify, describeRide, slug, toGpx } from "../bike/gpx.js";
 import { compact, resampleByDistance, smoothElevation } from "../bike/profile.js";
 import { maxRideKm } from "../bike/effort.js";
-import type { SpeedCurve } from "../bike/speed.js";
+import type { SpeedCurves } from "../bike/speed.js";
+import { SURFACES } from "../bike/surface.js";
 import type { Grid } from "../bike/contour.js";
 import { haversine, type Point } from "../shared/geo.js";
 import { resolveHome, type StationMatch } from "./stations.js";
@@ -71,7 +72,7 @@ export interface PlanRejection {
  * compact resampled profile fetched only when the variant is looked at. Neither
  * belongs in plan.json — together they would be several megabytes.
  */
-export type PlanRideVariant = Omit<RideVariant, "track"> & {
+export type PlanRideVariant = Omit<RideVariant, "track" | "surfaces"> & {
   gpx: string | null;
   /** Filename of the resampled elevation profile. Not `profile`, which is the
    *  BRouter profile this ride was routed with. */
@@ -88,8 +89,8 @@ export interface Plan {
     minRideHours: number;
     maxDays: number;
     hoursPerDay: number;
-    /** The rider's speed against gradient, so the browser times things the same way. */
-    speedByGradient: SpeedCurve;
+    /** The rider's speed against gradient and surface, so the browser times things the same way. */
+    speedByGradient: SpeedCurves;
     maxTransfers: number;
     minTransferMinutes: number;
     maxTransferMinutes: number;
@@ -336,7 +337,7 @@ export async function buildPlan(
       budgetHours: config.ride.budget.budgetHours,
       maxDays: config.ride.budget.maxDays,
       hoursPerDay: config.ride.budget.hoursPerDay,
-      speedByGradient: config.ride.effort.curve,
+      speedByGradient: config.ride.effort.curves,
       maxTransfers: config.trip.maxTransfers,
       minRideHours: config.ride.budget.minHours,
       minTransferMinutes: config.trip.minTransferSeconds / 60,
@@ -451,7 +452,7 @@ async function exportVariant(
   config: Config,
   options: BuildOptions,
 ): Promise<PlanRideVariant> {
-  const { track, ...rest } = variant;
+  const { track, surfaces, ...rest } = variant;
   if (track.length < 2) return { ...rest, gpx: null, elevationFile: null };
 
   const key = `${slug(stationName)}-${slug(variant.id)}`;
@@ -462,9 +463,32 @@ async function exportVariant(
     // points would each cover a different distance and not be comparable.
     const resampled = resampleByDistance(track, config.ride.profileStepMetres);
     const smoothed = { ...resampled, points: smoothElevation(resampled.points, 3) };
+
+    // Surface travels as a parallel array of indices rather than a fourth
+    // number on every point: it repeats for hundreds of samples at a time and
+    // small integers compress to almost nothing.
+    //
+    // Shipped only when it lines up sample for sample with the profile. The two
+    // are resampled by the same function at the same step so they always should,
+    // but a mismatch would silently shift every surface along the ride, and no
+    // surface at all is better than one that is subtly wrong.
+    const aligned = surfaces.length === smoothed.points.length;
+    if (!aligned && surfaces.length > 0) {
+      console.warn(
+        `  ${stationName} ${variant.id}: ${surfaces.length} surface samples for ` +
+          `${smoothed.points.length} profile points, dropping the surfaces`,
+      );
+    }
+
     profileFile = `${key}.json`;
     await mkdir(options.profileDir, { recursive: true });
-    await writeFile(path.join(options.profileDir, profileFile), JSON.stringify(compact(smoothed)));
+    await writeFile(
+      path.join(options.profileDir, profileFile),
+      JSON.stringify({
+        ...compact(smoothed),
+        ...(aligned ? { surfaces: surfaces.map((s) => SURFACES.indexOf(s)) } : {}),
+      }),
+    );
   }
 
   if (!options.gpxDir) return { ...rest, gpx: null, elevationFile: profileFile };

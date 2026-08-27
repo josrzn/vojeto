@@ -1,4 +1,5 @@
-import { flatKmh, speedAt, type SpeedCurve } from "./speed.js";
+import { fastestFlatKmh, speedOn, type SpeedCurves } from "./speed.js";
+import type { Surface } from "./surface.js";
 
 /**
  * How long a ride takes, and whether it fits in the time you have.
@@ -12,8 +13,11 @@ import { flatKmh, speedAt, type SpeedCurve } from "./speed.js";
  * Every duration in the project comes from here.
  */
 export interface EffortModel {
-  /** Speed against gradient. The only thing that decides how long a ride takes. */
-  curve: SpeedCurve;
+  /**
+   * Speed against gradient, one curve per surface. The only thing that decides
+   * how long a ride takes.
+   */
+  curves: SpeedCurves;
 }
 
 export interface Budget {
@@ -68,10 +72,15 @@ const EPSILON = 1e-6;
  * curve amplifies where the old linear model quietly averaged it away. Callers
  * resample and smooth first; `elapsedHours` is the one to reach for.
  */
-export function segmentHours(km: number, riseMetres: number, model: EffortModel): number {
+export function segmentHours(
+  km: number,
+  riseMetres: number,
+  surface: Surface,
+  model: EffortModel,
+): number {
   if (km <= 0) return 0;
   const gradient = riseMetres / (10 * km);
-  return km / speedAt(model.curve, gradient);
+  return km / speedOn(model.curves, surface, gradient);
 }
 
 /**
@@ -151,7 +160,7 @@ const BOUND_SLACK = 0.15;
 export function maxRideKm(trainHours: number, budget: Budget, model: EffortModel): number {
   const firstDay = Math.max(0, budget.budgetHours - trainHours);
   const laterDays = Math.max(0, budget.maxDays - 1) * budget.hoursPerDay;
-  return (firstDay + laterDays) * flatKmh(model.curve) * (1 + BOUND_SLACK);
+  return (firstDay + laterDays) * fastestFlatKmh(model.curves) * (1 + BOUND_SLACK);
 }
 
 /**
@@ -165,17 +174,29 @@ export function maxRideKm(trainHours: number, budget: Budget, model: EffortModel
  * increasing, since every speed on the curve is positive, which is what makes it
  * usable as an axis.
  */
-export function elapsedHours(km: number[], ele: number[], model: EffortModel): number[] {
+export function elapsedHours(
+  km: number[],
+  ele: number[],
+  surfaces: readonly Surface[],
+  model: EffortModel,
+): number[] {
   const out = [0];
   for (let i = 1; i < km.length; i++) {
     const run = Math.max(0, (km[i] ?? 0) - (km[i - 1] ?? 0));
     const rise = (ele[i] ?? 0) - (ele[i - 1] ?? 0);
-    out.push(out[i - 1]! + segmentHours(run, rise, model));
+    // No surface recorded for a sample is not the same as no surface: it takes
+    // the "unknown" curve, which the model names explicitly.
+    out.push(out[i - 1]! + segmentHours(run, rise, surfaces[i] ?? "unknown", model));
   }
   return out;
 }
 
 /** What a whole profile takes, in hours. */
-export function rideHours(km: number[], ele: number[], model: EffortModel): number {
-  return elapsedHours(km, ele, model).at(-1) ?? 0;
+export function rideHours(
+  km: number[],
+  ele: number[],
+  surfaces: readonly Surface[],
+  model: EffortModel,
+): number {
+  return elapsedHours(km, ele, surfaces, model).at(-1) ?? 0;
 }

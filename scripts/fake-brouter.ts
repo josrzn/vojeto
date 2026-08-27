@@ -52,6 +52,60 @@ createServer((request, response) => {
     ascent += Math.max(0, coordinates[i]![2]! - coordinates[i - 1]![2]!);
   }
 
+  // A messages table shaped like the real one, so the surface pipeline is
+  // exercised locally rather than only in unit tests. The gravel profile gets
+  // mostly track, the fast one mostly road, and a stretch of every route is
+  // left untagged — which is the case that matters, because a lot of rural
+  // France is tagged exactly that well.
+  const stretches: Array<[number, string]> = [];
+  const wayCount = 40;
+  for (let i = 0; i < wayCount; i++) {
+    const t = i / wayCount;
+    const gravelly = profile.includes("gravel") ? 0.6 : profile.includes("fast") ? 0.1 : 0.3;
+    const roll = ((seed * (i + 7)) % 100) / 100;
+    stretches.push([
+      metres / wayCount,
+      roll < 0.12
+        ? "name=Chemin des Vignes"
+        : roll < 0.12 + gravelly
+          ? "highway=track surface=gravel tracktype=grade3"
+          : "highway=secondary surface=asphalt",
+    ]);
+  }
+
+  const messages = [
+    [
+      "Longitude",
+      "Latitude",
+      "Elevation",
+      "Distance",
+      "CostPerKm",
+      "ElevCost",
+      "TurnCost",
+      "NodeCost",
+      "InitialCost",
+      "WayTags",
+      "NodeTags",
+      "Time",
+      "Energy",
+    ],
+    ...stretches.map(([length, tags]) => [
+      "0",
+      "0",
+      "0",
+      String(Math.round(length)),
+      "1000",
+      "0",
+      "0",
+      "0",
+      "0",
+      tags,
+      "",
+      "0",
+      "0",
+    ]),
+  ];
+
   response.writeHead(200, { "Content-Type": "application/json" });
   response.end(
     JSON.stringify({
@@ -63,6 +117,7 @@ createServer((request, response) => {
             "track-length": String(Math.round(metres)),
             "filtered ascend": String(Math.round(ascent)),
             "total-time": String(Math.round((metres / 1000 / 17) * 3600)),
+            messages,
           },
           geometry: { type: "LineString", coordinates },
         },

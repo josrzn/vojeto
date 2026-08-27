@@ -1,17 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { fitsBudget, maxRideKm, rideHours, type Budget, type EffortModel } from "../src/bike/effort.js";
 import { curveFromLinearModel, flatKmh } from "../src/bike/speed.js";
+import type { Surface } from "../src/bike/surface.js";
 
-const model: EffortModel = { curve: curveFromLinearModel(16, 600) };
+/** One curve for every surface, i.e. gradient modelled and surface not. */
+const everywhere = (curve: ReturnType<typeof curveFromLinearModel>): EffortModel => ({
+  curves: { paved: curve, unpaved: curve, unknown: curve },
+});
+
+const model: EffortModel = everywhere(curveFromLinearModel(16, 600));
 
 /** A profile of `km` at a steady gradient, as the model now wants its input. */
 const slope = (km: number, ascentMetres: number) => ({
   km: [0, km],
   ele: [0, ascentMetres],
 });
-const hoursFor = (km: number, ascentMetres: number, m: EffortModel = model) => {
+const hoursFor = (
+  km: number,
+  ascentMetres: number,
+  m: EffortModel = model,
+  surface: Surface = "paved",
+) => {
   const { km: xs, ele } = slope(km, ascentMetres);
-  return rideHours(xs, ele, m);
+  return rideHours(xs, ele, [surface, surface], m);
 };
 const dayTrip: Budget = { budgetHours: 6, maxDays: 1, hoursPerDay: 6, minHours: 0 };
 
@@ -44,17 +55,15 @@ describe("rideHours", () => {
   });
 
   it("is faster downhill than on the flat, which the old model never was", () => {
-    const curve = { curve: curveFromLinearModel(16, 600) };
+    const curve = everywhere(curveFromLinearModel(16, 600));
     // The derived curve inherits the old model's flat descents...
     expect(hoursFor(48, -600, curve)).toBeCloseTo(hoursFor(48, 0, curve), 6);
     // ...while a curve with real descending speeds does not.
-    const descends: EffortModel = {
-      curve: [
-        { gradient: -5, kmh: 30 },
-        { gradient: 0, kmh: 16 },
-        { gradient: 5, kmh: 8 },
-      ],
-    };
+    const descends: EffortModel = everywhere([
+      { gradient: -5, kmh: 30 },
+      { gradient: 0, kmh: 16 },
+      { gradient: 5, kmh: 8 },
+    ]);
     expect(hoursFor(48, -600, descends)).toBeLessThan(hoursFor(48, 0, descends));
   });
 });
@@ -195,9 +204,9 @@ describe("maxRideKm", () => {
     // must still be rejected only by the budget, never by the bound.
     for (const trainHours of [0.5, 1, 2, 3]) {
       const km = maxRideKm(trainHours, dayTrip, model);
-      const flatRide = km / flatKmh(model.curve);
+      const flatRide = km / flatKmh(model.curves.paved);
       expect(flatRide).toBeGreaterThan(dayTrip.budgetHours - trainHours);
-      const longestThatFits = (dayTrip.budgetHours - trainHours) * flatKmh(model.curve);
+      const longestThatFits = (dayTrip.budgetHours - trainHours) * flatKmh(model.curves.paved);
       expect(km).toBeGreaterThanOrEqual(longestThatFits);
     }
   });

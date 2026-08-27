@@ -1,3 +1,5 @@
+import { SURFACES, type Surface } from "./surface.js";
+
 /**
  * How fast you ride, as a function of gradient.
  *
@@ -22,6 +24,9 @@ export interface SpeedAnchor {
 }
 
 export type SpeedCurve = readonly SpeedAnchor[];
+
+/** One curve per surface: the whole speed model. */
+export type SpeedCurves = Readonly<Record<Surface, SpeedCurve>>;
 
 /**
  * A loaded tourer on mixed French back roads, as a starting point.
@@ -58,6 +63,53 @@ export const TOURING_CURVE: SpeedCurve = [
 ];
 
 /**
+ * The same rider on gravel, and the shape of the difference is the point.
+ *
+ * Loose surface costs you most where you were going fastest: the descent that
+ * was 32 km/h on tarmac is 20 on gravel, because it is ridden on the brakes.
+ * It costs you least on a steep climb, where 4 km/h is 4 km/h whatever is under
+ * the tyre. A single "gravel is twenty percent slower" multiplier would flatten
+ * exactly the structure worth seeing.
+ */
+export const GRAVEL_CURVE: SpeedCurve = [
+  { gradient: -20, kmh: 11 },
+  { gradient: -14, kmh: 14 },
+  { gradient: -9, kmh: 18 },
+  { gradient: -6, kmh: 20 },
+  { gradient: -4, kmh: 19.5 },
+  { gradient: -2, kmh: 16.5 },
+  { gradient: -1, kmh: 15 },
+  { gradient: 0, kmh: 13 },
+  { gradient: 1, kmh: 11 },
+  { gradient: 2, kmh: 9.6 },
+  { gradient: 3, kmh: 8.5 },
+  { gradient: 4, kmh: 7.8 },
+  { gradient: 5, kmh: 7.2 },
+  { gradient: 6, kmh: 6.4 },
+  { gradient: 8, kmh: 5 },
+  { gradient: 10, kmh: 4 },
+  { gradient: 12, kmh: 3.5 },
+  { gradient: 15, kmh: 3.1 },
+  { gradient: 20, kmh: 2.6 },
+];
+
+/**
+ * The default model: road speeds on anything surfaced, gravel speeds on
+ * anything that is not, and road speeds where nobody has recorded which.
+ *
+ * `unknown` takes the optimistic curve on purpose. The pessimistic choice would
+ * quietly inflate every duration in a region where OSM happens to be thinly
+ * tagged, and a slow answer that is wrong for a reason you cannot see is worse
+ * than a fast one you have been told to distrust — so the share of unrecorded
+ * surface is reported instead of being priced in.
+ */
+export const TOURING_CURVES: SpeedCurves = {
+  paved: TOURING_CURVE,
+  unpaved: GRAVEL_CURVE,
+  unknown: TOURING_CURVE,
+};
+
+/**
  * Speed at a gradient, interpolated between anchors and flat outside them.
  *
  * Holding the end values rather than extrapolating is deliberate: extrapolating
@@ -83,9 +135,24 @@ export function speedAt(curve: SpeedCurve, gradient: number): number {
   return a.kmh + (b.kmh - a.kmh) * t;
 }
 
+/** Speed on a given surface at a given gradient. */
+export function speedOn(curves: SpeedCurves, surface: Surface, gradient: number): number {
+  return speedAt(curves[surface] ?? curves.paved, gradient);
+}
+
 /** Speed on the flat, which stands in for the curve wherever one number is wanted. */
 export function flatKmh(curve: SpeedCurve): number {
   return speedAt(curve, 0);
+}
+
+/**
+ * The fastest the model allows anywhere, used only for the pruning bound.
+ *
+ * Taken across every surface, since the bound must not exclude a destination
+ * the router might reach on the quick one.
+ */
+export function fastestFlatKmh(curves: SpeedCurves): number {
+  return Math.max(...SURFACES.map((surface) => flatKmh(curves[surface] ?? curves.paved)));
 }
 
 /**
@@ -138,7 +205,7 @@ export function validateCurve(curve: SpeedCurve, where: string): SpeedCurve {
   return curve;
 }
 
-/** A few points off the curve, for the line of small print under the map. */
+/** A few points off a curve, for the line of small print under the map. */
 export function describeCurve(curve: SpeedCurve): string {
   const one = (gradient: number, suffix: string) =>
     `${Number(speedAt(curve, gradient).toFixed(1))} km/h ${suffix}`;

@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { curveFromLinearModel } from "../src/bike/speed.js";
+import { curveFromLinearModel, type SpeedCurve, type SpeedCurves } from "../src/bike/speed.js";
+import { surfacesAlong } from "../src/bike/surface.js";
+
+const everywhere = (curve: SpeedCurve): SpeedCurves => ({
+  paved: curve,
+  unpaved: curve,
+  unknown: curve,
+});
 import { rideHours } from "../src/bike/effort.js";
 import { resampleByDistance, smoothElevation } from "../src/bike/profile.js";
 import { createServer, type Server } from "node:http";
@@ -96,7 +103,7 @@ const options = (overrides: Partial<RideOptions> = {}): RideOptions => ({
   throttleMs: 0,
   variants: [{ id: "trekking", label: "Quiet roads", profile: "trekking" }],
   alternatives: 1,
-  effort: { curve: curveFromLinearModel(16, 600) },
+  effort: { curves: everywhere(curveFromLinearModel(16, 600)) },
   profileStepMetres: 100,
   budget: { budgetHours: 12, maxDays: 1, hoursPerDay: 6, minHours: 0 },
   trainHours: 1,
@@ -220,10 +227,12 @@ describe("planRidesHome", () => {
     const distances = cumulativeDistances(variant!.track);
     const step = 100;
     const points = smoothElevation(resampleByDistance(variant!.track, step).points, 3);
+    const sampleKm = points.map((_, i) => Math.min(i * step, distances.at(-1)!) / 1000);
     const expected = rideHours(
-      points.map((_, i) => Math.min(i * step, distances.at(-1)!) / 1000),
+      sampleKm,
       points.map((point) => point[2] ?? 0),
-      { curve: curveFromLinearModel(16, 600) },
+      surfacesAlong([], sampleKm),
+      { curves: everywhere(curveFromLinearModel(16, 600)) },
     );
     expect(variant!.hours).toBeCloseTo(expected, 9);
   });

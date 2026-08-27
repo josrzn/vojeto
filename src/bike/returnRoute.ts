@@ -2,6 +2,7 @@ import type { TimetableIndex } from "../shared/types.js";
 import { cumulativeDistances, haversine, nearest, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
 import { resampleByDistance, smoothElevation } from "./profile.js";
+import { surfaceShares, surfacesAlong, type Surface } from "./surface.js";
 import { elapsedHours, fitsBudget, type Budget, type EffortModel, type Verdict } from "./effort.js";
 
 export interface BailoutStation {
@@ -37,6 +38,15 @@ export interface RideVariant {
   alternative: number;
   km: number;
   ascentMetres: number;
+  /** Kilometres on each surface, which is where "18 km unpaved" comes from. */
+  surfaceKm: Record<Surface, number>;
+  /**
+   * The surface at every sample of the shipped profile.
+   *
+   * Stripped out of plan.json alongside `track`: it belongs with the elevation
+   * profile, which is fetched only for the ride you are looking at.
+   */
+  surfaces: Surface[];
   /** Our own estimate, from distance and climb. */
   hours: number;
   /** BRouter's estimate for the profile, kept for comparison. */
@@ -184,7 +194,8 @@ async function planOne(
   const km = totalMetres / 1000;
 
   const shape = profileOf(track.coordinates, options.profileStepMetres, totalMetres);
-  const effortHours = elapsedHours(shape.km, shape.ele, options.effort);
+  const surfaces = surfacesAlong(track.ways, shape.km);
+  const effortHours = elapsedHours(shape.km, shape.ele, surfaces, options.effort);
   const hours = effortHours.at(-1) ?? 0;
   const verdict = fitsBudget(options.trainHours, hours, options.budget);
 
@@ -227,6 +238,8 @@ async function planOne(
     alternative,
     km,
     ascentMetres: Math.round(shape.ascent.at(-1) ?? 0),
+    surfaceKm: surfaceShares(surfaces, shape.km),
+    surfaces,
     hours,
     brouterHours: track.estimatedSeconds / 3600,
     days: verdict.days,

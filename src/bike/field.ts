@@ -3,6 +3,7 @@ import { haversine, type Point } from "../shared/geo.js";
 import { routeBike, type BRouterOptions } from "./brouter.js";
 import { rideHours, type EffortModel } from "./effort.js";
 import { resampleByDistance, smoothElevation } from "./profile.js";
+import { surfacesAlong } from "./surface.js";
 
 export interface FieldOptions extends Omit<BRouterOptions, "alternative"> {
   effort: EffortModel;
@@ -93,9 +94,13 @@ export async function sampleRideField(home: Point, options: FieldOptions): Promi
           resampleByDistance(track.coordinates, options.profileStepMetres).points,
           3,
         );
+        const sampleKm = points.map(
+          (_, i) => Math.min(i * options.profileStepMetres, track.metres) / 1000,
+        );
         values[row * cols + col] = rideHours(
-          points.map((_, i) => Math.min(i * options.profileStepMetres, track.metres) / 1000),
+          sampleKm,
           points.map((point) => point[2] ?? 0),
+          surfacesAlong(track.ways, sampleKm),
           options.effort,
         );
         sampled++;
