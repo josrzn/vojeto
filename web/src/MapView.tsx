@@ -8,7 +8,7 @@ import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 
 import { contourFeatures } from "../../src/bike/contour.js";
-import { GRADE_COLORS, bandSeries, type LoadedProfile } from "./grade.js";
+import { MAP_GRADE_COLORS, bandSeries, type LoadedProfile } from "./grade.js";
 
 interface Props {
   plan: Plan;
@@ -236,7 +236,7 @@ export function MapView({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             // Falls back to the ride's own colour until the elevation arrives.
-            "line-color": ["coalesce", ["get", "color"], "#d03b3b"],
+            "line-color": ["coalesce", ["get", "color"], "#cc373f"],
             "line-width": 3.5,
           },
         });
@@ -246,7 +246,7 @@ export function MapView({
           source: HOVER_SOURCE,
           paint: {
             "circle-radius": 6,
-            "circle-color": "#7d1c1c",
+            "circle-color": "#811d22",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2.5,
           },
@@ -259,7 +259,7 @@ export function MapView({
           paint: {
             "circle-radius": 5,
             "circle-color": "#ffffff",
-            "circle-stroke-color": "#d03b3b",
+            "circle-stroke-color": "#cc373f",
             "circle-stroke-width": 2.5,
           },
         });
@@ -276,7 +276,7 @@ export function MapView({
               // aqua for stations clears the chroma floor that the old
               // desaturated green did not.
               ["get", "isHome"], "#0b0b0b",
-              ["get", "isSelected"], "#d03b3b",
+              ["get", "isSelected"], "#cc373f",
               "#1baf7a",
             ],
             "circle-stroke-color": "#ffffff",
@@ -546,7 +546,7 @@ export function MapView({
               type: "FeatureCollection",
               // One feature per band rather than per segment: five multi-line
               // features instead of several hundred single ones.
-              features: GRADE_COLORS.map((color, band) => ({
+              features: MAP_GRADE_COLORS.map((color, band) => ({
                 type: "Feature" as const,
                 properties: { color, band },
                 geometry: {

@@ -159,6 +159,11 @@ Each profile is requested `alternatives` times, using BRouter's
 Identical results are dropped, and each is checked against the budget
 separately — a gravel route can be too slow for a day when the direct one fits.
 
+**The list is ordered quickest first**, not grouped by profile. So "Direct 2"
+can sit ahead of "Direct" — the second alternative for a profile is not a
+fallback, and often comes out a few minutes faster than the first. Routes that
+overrun the budget sort to the end.
+
 #### What a profile actually is
 
 `profile` is the only thing in the routing request that decides which roads you
@@ -370,10 +375,28 @@ Selecting a ride draws an elevation profile in the trip panel and shades the
 route on the map by gradient, from the same data and the same scale. Hovering
 the profile marks that point on the map.
 
-Gradient is banded — flat or downhill, 1–3%, 3–6%, 6–9%, 9%+ — on a single-hue
-ordinal ramp, light to dark, so steepness reads as depth of colour rather than a
-change of hue. Flat and downhill take a recessive grey: climbing is what costs
-you. Every band is labelled, so nothing rests on colour alone.
+Gradient is banded — downhill, flat, 1–3%, 3–6%, 6–9%, 9%+ — on a diverging
+scale: climbing on a warm arm that darkens with steepness, descending on a cool
+one, flat as the neutral grey between them. Descent gets a band of its own
+because it is a different kind of riding rather than a milder version of
+climbing: it is where the time goes back in. Every band is labelled, so nothing
+rests on colour alone.
+
+The descent step is a muted teal rather than a blue, because the ride line and
+the train line are both lines on the same map and blue is the train's. Even so,
+**the map folds descent back into the grey.** A thin stroke running a few pixels
+from the train's equally thin one reads as a second railway however far apart the
+two colours measure — separation thresholds assume marks with some area to them.
+In the profile the same colour is a large filled region with nothing blue near
+it, so there it stays. The map and the chart carry their own keys, so neither
+contradicts itself.
+
+Nothing in the ramp was picked by eye. The climbing arm passes the ordinal checks
+— monotone lightness, adjacent lightness gaps, light-end contrast against the
+page, single hue — and every pair that touches was measured under normal vision
+and under simulated protanopia and deuteranopia: descent against flat, flat
+against the first climbing step, and descent against both the train blue and the
+contour green it shares the map with.
 
 The band colours the **area**, not just the line. The area is the largest thing
 on screen, so it has to be the channel that encodes gradient; a flat wash under
@@ -396,6 +419,28 @@ Two things the numbers cannot do:
 - Gradients are measured over an even `ride.profileStepMetres` (100 m by
   default), not between the router's own points, which are spaced by OSM nodes
   and would each cover a different distance.
+
+### The mix of a ride
+
+Under the chart is a single stacked bar: what share of the ride falls in each
+band. The profile answers "where is the climbing"; this answers "how much of it
+is climbing", which is the question you are actually asking when choosing between
+six ways home. Reading that off the profile means integrating a wiggly line by
+eye, and a fifth of a ride at 6–9% does not look like a fifth of anything when it
+is spread over four separate ramps.
+
+It follows the axis switch, and that is the interesting part. The same ride, by
+distance and then by time:
+
+```
+distance   40% downhill · 35% flat · 24% at 3–6%
+time       29% downhill · 31% flat · 39% at 3–6%
+```
+
+Nothing about the road changed. Two fifths of the kilometres are downhill and
+under a third of the afternoon is; the climbing goes the other way. Which of
+those two readings you want depends on whether you are asking how far the ride
+is or how hard it is.
 
 ### Distance or time along the bottom
 

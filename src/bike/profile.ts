@@ -16,14 +16,27 @@ export interface RouteProfile {
 }
 
 /**
- * Gradient bands, in percent. Climbing is what costs you, so descent and the
- * flat share the recessive band and the rest step up by steepness.
+ * Where the climbing bands start, in percent.
+ *
+ * Climbing is what costs you, so most of the resolution is spent on it.
  */
 export const GRADE_BANDS = [1, 3, 6, 9] as const;
 
-/** 0 for flat or downhill, then one band per threshold. */
+/**
+ * Below this, in percent, the road is going down rather than merely not up.
+ *
+ * The mirror of the first climbing band, so "flat" is a symmetric window either
+ * side of level. Descent gets a band of its own because it is a different kind
+ * of riding, not a milder version of the same one: it is where the time goes
+ * back in, and a ride that is a third descent is a different proposition from
+ * one that is a third flat, even though neither costs you anything to climb.
+ */
+export const DOWNHILL_BAND = -GRADE_BANDS[0];
+
+/** 0 downhill, 1 flat, then one band per climbing threshold. */
 export function gradeBand(percent: number): number {
-  let band = 0;
+  if (percent < DOWNHILL_BAND) return 0;
+  let band = 1;
   for (const threshold of GRADE_BANDS) if (percent >= threshold) band++;
   return band;
 }

@@ -1,24 +1,58 @@
-import { GRADE_BANDS, bandSeries, gradeBand } from "../../src/bike/profile.js";
+import { DOWNHILL_BAND, GRADE_BANDS, bandSeries, gradeBand } from "../../src/bike/profile.js";
 
 /**
- * Gradient bands as an ordinal ramp: one hue, light to dark, so steepness is
- * legible as depth of colour rather than as a change of hue. Flat and downhill
- * take a recessive grey — they are not what costs you.
+ * Gradient as a diverging scale: climbing on the warm arm, descending on the
+ * cool one, flat as the neutral grey between them. Steepness reads as depth of
+ * colour within an arm, so the order is visible without consulting the key.
  *
- * Red, because the bike is the warm half of this map and the train the cool
- * one. Two steps are documented hexes; the ramp as a whole was run through the
- * ordinal checks (monotone lightness, step gaps, light-end contrast, single
- * hue) rather than picked by eye.
+ * Red for the climbing arm, because the bike is the warm half of this map and
+ * the train the cool one. The descent step is a muted teal rather than a blue:
+ * the ride line and the train line are both lines on the same map, and blue is
+ * the train's.
+ *
+ * Nothing here was picked by eye. The climbing arm passes the ordinal checks —
+ * monotone lightness, adjacent lightness gaps, light-end contrast on the page,
+ * single hue. Every pair that touches was measured for separation under normal
+ * vision and under simulated protanopia and deuteranopia: descent against flat,
+ * flat against the first climbing step, and the descent step against both the
+ * train blue and the contour green it shares the map with.
  */
-export const GRADE_COLORS = ["#c3c2b7", "#f0a3a2", "#e66767", "#d03b3b", "#7d1c1c"] as const;
+export const GRADE_COLORS = [
+  "#51a7b6",
+  "#c3c2b7",
+  "#e8837f",
+  "#df6463",
+  "#cc373f",
+  "#811d22",
+] as const;
 
 export const GRADE_LABELS = [
-  "flat or down",
+  "downhill",
+  "flat",
   `${GRADE_BANDS[0]}–${GRADE_BANDS[1]}%`,
   `${GRADE_BANDS[1]}–${GRADE_BANDS[2]}%`,
   `${GRADE_BANDS[2]}–${GRADE_BANDS[3]}%`,
   `${GRADE_BANDS[3]}%+`,
 ] as const;
+
+/**
+ * The ramp as the map draws it, with descent folded back into the flat grey.
+ *
+ * On the map the ride home is a thin stroke, often running within a few pixels
+ * of the train's equally thin blue one, and a cool stroke there reads as a
+ * second railway however far apart the two colours measure — the separation
+ * thresholds assume marks with some area to them. In the profile the same
+ * colour is a large filled region with nothing blue anywhere near it, so it
+ * stays. The two surfaces carry their own keys, so neither contradicts itself.
+ */
+export const MAP_GRADE_COLORS = GRADE_COLORS.map((color, band) =>
+  band === 0 ? GRADE_COLORS[1] : color,
+);
+
+/** Bands dark enough that a label sitting on one has to be light. */
+export const DARK_BANDS = new Set([4, 5]);
+
+export { DOWNHILL_BAND };
 
 export { gradeBand, bandSeries };
 

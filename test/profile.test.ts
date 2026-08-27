@@ -70,24 +70,30 @@ describe("resampleByDistance", () => {
 });
 
 describe("gradeBand", () => {
-  it("puts flat and downhill in the recessive band", () => {
+  it("gives descent a band of its own", () => {
     expect(gradeBand(-12)).toBe(0);
-    expect(gradeBand(0)).toBe(0);
-    expect(gradeBand(0.9)).toBe(0);
+    expect(gradeBand(-3)).toBe(0);
+    expect(gradeBand(-1.01)).toBe(0);
+  });
+
+  it("keeps a symmetric window either side of level as flat", () => {
+    expect(gradeBand(-1)).toBe(1);
+    expect(gradeBand(0)).toBe(1);
+    expect(gradeBand(0.9)).toBe(1);
   });
 
   it("steps up with steepness", () => {
-    expect(gradeBand(1)).toBe(1);
-    expect(gradeBand(2.9)).toBe(1);
-    expect(gradeBand(3)).toBe(2);
-    expect(gradeBand(6)).toBe(3);
-    expect(gradeBand(9)).toBe(4);
-    expect(gradeBand(20)).toBe(4);
+    expect(gradeBand(1)).toBe(2);
+    expect(gradeBand(2.9)).toBe(2);
+    expect(gradeBand(3)).toBe(3);
+    expect(gradeBand(6)).toBe(4);
+    expect(gradeBand(9)).toBe(5);
+    expect(gradeBand(20)).toBe(5);
   });
 
   it("never skips a band as the gradient rises", () => {
     let previous = 0;
-    for (let g = -5; g <= 15; g += 0.25) {
+    for (let g = -20; g <= 20; g += 0.25) {
       const band = gradeBand(g);
       expect(band - previous).toBeLessThanOrEqual(1);
       expect(band).toBeGreaterThanOrEqual(previous);
@@ -174,8 +180,8 @@ describe("bandSeries", () => {
   it("still reports a climb that genuinely persists", () => {
     const grades = [...Array(20).fill(0), ...Array(20).fill(7)];
     const bands = bandSeries(grades);
-    expect(bands[2]).toBe(0);
-    expect(bands.at(-1)).toBe(3);
+    expect(bands[2]).toBe(gradeBand(0));
+    expect(bands.at(-1)).toBe(gradeBand(7));
   });
 
   it("absorbs a brief excursion but not a sustained one", () => {

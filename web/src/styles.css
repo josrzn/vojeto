@@ -5,7 +5,7 @@
   --paper: #ffffff;
   --panel: #f6f8fa;
   --rail: #2a78d6;
-  --bike: #d03b3b;
+  --bike: #cc373f;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
 }
@@ -357,10 +357,10 @@ code {
   background: linear-gradient(
     to right,
     #c3c2b7 0 20%,
-    #f0a3a2 20% 40%,
-    #e66767 40% 60%,
-    #d03b3b 60% 80%,
-    #7d1c1c 80% 100%
+    #e8837f 20% 40%,
+    #df6463 40% 60%,
+    #cc373f 60% 80%,
+    #811d22 80% 100%
   );
 }
 .swatch-ring { border-top-color: #2f6b5b; border-top-width: 2px; }
@@ -525,11 +525,50 @@ code {
 .profile-hint { color: #93a1b0; }
 .profile-band { color: #93a1b0; }
 
+/* Effort mix ------------------------------------------------------------- */
+
+.mix { margin: 0.5rem 0 0; }
+
+/* A 2px page-coloured gap between segments, so two neighbouring steps of the
+   ramp never share an edge — the pale end of the arm is close enough that a
+   shared edge is where they blur together. */
+.mix-bar {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+  overflow: hidden;
+}
+.mix-part {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2px;
+  overflow: hidden;
+}
+.mix-part:first-child { border-radius: 4px 0 0 4px; }
+.mix-part:last-child { border-radius: 0 4px 4px 0; }
+
+/* Ink, not the segment colour: the figure is text and wears a text colour.
+   Light only where the fill beneath it is too dark to read ink on. */
+.mix-figure {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.on-dark .mix-figure { color: #ffffff; opacity: 0.9; }
+
+.mix-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.68rem;
+  color: #93a1b0;
+}
+
 .grade-key {
   list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.15rem 0.4rem;
   margin: 0.4rem 0 0;
   padding: 0;
   font-size: 0.68rem;

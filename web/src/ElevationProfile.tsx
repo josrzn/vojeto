@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { elapsedHours, type EffortModel } from "../../src/bike/effort.js";
 import { formatHours } from "./corridors.js";
+import { EffortMix } from "./EffortMix.js";
 import { GRADE_COLORS, GRADE_LABELS, bandSeries, gradeBand, type LoadedProfile } from "./grade.js";
 
 interface Props {
@@ -86,6 +87,11 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
   const showTime = axis === "time" && elapsed !== null;
   const domain = showTime ? elapsed! : profile.km;
 
+  // Banded once for the whole series, so a stretch keeps one colour instead of
+  // flickering wherever the gradient brushes a threshold. Shared with the mix
+  // bar, which has to divide the ride the same way the chart colours it.
+  const bands = useMemo(() => bandSeries(profile.grade), [profile]);
+
   const geometry = useMemo(() => {
     const total = domain.at(-1) || 1;
     const lo = Math.min(...profile.ele);
@@ -112,10 +118,6 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
     const lineByBand: string[] = GRADE_COLORS.map(() => "");
     const areaByBand: string[] = GRADE_COLORS.map(() => "");
 
-    // Banded once for the whole series, so a stretch keeps one colour instead
-    // of flickering wherever the gradient brushes a threshold.
-    const bands = bandSeries(profile.grade);
-
     let runStart = 1;
     const closeRun = (from: number, to: number, band: number) => {
       const top = [];
@@ -139,7 +141,7 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
     }
 
     return { x, y, areaByBand, lineByBand, total, yLo, yHi, plotH, plotW };
-  }, [profile, domain]);
+  }, [profile, domain, bands]);
 
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -306,6 +308,13 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
           </>
         )}
       </figcaption>
+
+      <EffortMix
+        bands={bands}
+        domain={domain}
+        totalLabel={showTime ? formatHours(geometry.total) : `${totalKm.toFixed(0)} km`}
+        measure={showTime ? "time" : "distance"}
+      />
 
       <ul className="grade-key">
         {GRADE_LABELS.map((label, band) => (
