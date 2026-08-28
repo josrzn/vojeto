@@ -588,17 +588,23 @@ public/data/timetable.times.bin  every call time, as one Int32Array
 Parsing the feed costs a 4 MB zip and 378,000 CSV rows and takes seconds. That
 is fine once on a laptop and impossible on every page visit, so it happens once
 and the result is written out. On the real SNCF feed — 2,497 stops, 3,670
-patterns, 28,600 trips, 304,000 calls — that comes to:
+patterns, 28,600 trips, 304,000 calls — `ingest` reports:
 
 | | raw | over the wire |
 | --- | --- | --- |
-| `timetable.json` | 2.3 MB | 370 KB |
-| `timetable.times.bin` | 2.5 MB | 157 KB |
-| | | **527 KB** |
+| `timetable.json` | 6.6 MB | 703 KB |
+| `timetable.times.bin` | 2.2 MB | ~160 KB |
+| | | **~860 KB** |
 
-`JSON.parse` of the structure takes about 11 ms. The raw figures matter only if
-you serve it without compression; the fixed-width times array is nearly all
-zero bytes and gzips sixteenfold.
+The raw figures matter only if you serve it without compression; the
+fixed-width times array is nearly all zero bytes and gzips sixteenfold.
+
+Most of the structure is calendars. This feed ships no `calendar.txt`, so every
+service day is an explicit date in `calendar_dates.txt`, and there are tens of
+thousands of distinct services — which is also why 56,000 strings are interned
+rather than a few thousand. Storing those dates as day offsets from the feed
+start, rather than as `20260829`, would cut the structure substantially; it has
+not been done because 860 KB is already a normal payload.
 
 **Two files, split where the bytes are.** Times are three quarters of the index
 and the only part that wants to be a typed array — in memory an `Int32Array`
@@ -611,6 +617,17 @@ that stays invisible until a single train has the wrong departure time.
 
 Times are seconds, in `Int32Array`, not minutes in a `Uint16Array`. Minutes
 would halve the raw size and silently round any feed that publishes seconds.
+
+**It is read in a worker.** `web/src/timetable.worker.ts` hosts a
+`TimetableService`, and `Timetable` in `timetableClient.ts` wraps it as
+promise-returning calls. Requests carry an id and replies quote it, so several
+can be in flight and none has to be the next one back — a query fired while a
+slider is still moving must not be mistaken for the answer to the one after it.
+
+Measured in Chromium on a synthetic index at three quarters of the real feed's
+size: **182 ms** to fetch, parse and unpack both files, and **10 ms** per query
+over 3,670 patterns, with no long task on the main thread at any point.
+Switching home station is one of those queries.
 
 **Nothing derived is stored.** `stopIndex`, `stopsInStation` and
 `patternsAtStop` are rebuilt on load by `deriveLookups` — the same function the
