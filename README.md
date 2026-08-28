@@ -102,6 +102,42 @@ though nothing was routed.
 
 Going back to the plan's own home restores the full view exactly.
 
+### Routing from the page
+
+Away from the plan's own home, **Route N rides home** asks BRouter directly —
+the browser has permission, `brouter.de` answers with
+`Access-Control-Allow-Origin: *`.
+
+**Nearest first**, by straight-line distance to your door. The closest station
+is both the likeliest to be feasible and the likeliest to be the one you are
+about to click, so the order that fills the map outwards from the middle is also
+the order that answers the question you already have.
+
+**One route per station, not six.** The planner asks for every profile and every
+alternative because it has all night. Here the first route is a *filter*: it
+says whether this station is a trip at all. The other ways home are worth
+fetching only for the station you actually pick.
+
+**Started on a click, not on every change.** Each station is one request to
+donated hardware, a second apart. A home moved three times while someone makes
+up their mind should not cost three hundred of them. Moving the home again
+aborts whatever is in flight — those routes ended at a door that has moved.
+
+The ring on the map is the outer bound: how far the budget could put you if the
+train took no time at all. Nothing beyond it is reachable whatever train you
+catch, which is why the map stops offering stations there. Each station inside
+is still tested against its own train time, which is a smaller circle.
+
+`ride.brouterUrl` travels in `plan.json`, so pointing the page at a self-hosted
+BRouter is a config change rather than a code change. That matters: the public
+instance is donated, and a hundred stations per visitor is not a polite thing to
+ask of it.
+
+**Two things a live-routed ride does not have.** No GPX and no elevation
+profile, because both are files the planner writes to disk and there is nowhere
+to write them from a page. The chart stays empty rather than showing the profile
+of a road to a different door — which it did, until a browser test caught it.
+
 ### Moving the budget without rebuilding
 
 The trip panel's **your day** control changes `budgetHours`, `minHours`,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
+import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
 import { SURFACES, type LoadedProfile } from "./grade.js";
 import {
@@ -15,6 +15,8 @@ import { HomePicker } from "./HomePicker.js";
 import { Timetable } from "./timetableClient.js";
 import type { Station } from "./timetableService.js";
 import { explore, quickestTrains, sameHome, type Home } from "./explore.js";
+import { routeNearestFirst, type Progress } from "./routeHome.js";
+import { maxRideKm } from "../../src/bike/effort.js";
 import { parseTime } from "../../src/gtfs/time.js";
 import { reckon } from "./budget.js";
 import type { Budget } from "../../src/bike/effort.js";
@@ -129,6 +131,15 @@ interface Live {
   querying: boolean;
 }
 
+/**
+ * Where the browser routes when the plan does not say.
+ *
+ * The public instance, the same one `npm run plan` defaults to. It is donated
+ * hardware, which is why routing starts on a click rather than on every change
+ * of mind, and why requests go one at a time.
+ */
+const BROUTER_FALLBACK = "https://brouter.de/brouter";
+
 type Load =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -153,7 +164,10 @@ export function App() {
   const [stations, setStations] = useState<Station[] | null>(null);
   const [timetableError, setTimetableError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  const [liveRides, setLiveRides] = useState<Record<string, PlanRideVariant[]>>({});
+  const [routing, setRouting] = useState<Progress | null>(null);
   const timetable = useRef<Timetable | null>(null);
+  const routingRun = useRef<AbortController | null>(null);
   const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
   const selectedRow = useRef<HTMLLIElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -222,49 +236,6 @@ export function App() {
   // Elevation is fetched per variant rather than shipped in plan.json: at ~10 KB
   // each, all of them together would be several megabytes for data you only look
   // at one variant at a time.
-  const elevationFile =
-    plan && selected
-      ? ((plan.rides[selected] ?? []).find((v) => v.id === variantId) ??
-          (plan.rides[selected] ?? []).find((v) => v.feasible) ??
-          (plan.rides[selected] ?? [])[0])?.elevationFile ?? null
-      : null;
-
-  useEffect(() => {
-    if (!elevationFile) {
-      setProfile(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`./data/profiles/${elevationFile}`)
-      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((raw: { step: number; points: number[][]; surfaces?: number[] }) => {
-        if (cancelled) return;
-        const km: number[] = [0];
-        for (let i = 1; i < raw.points.length; i++) {
-          const p = raw.points[i - 1]!;
-          const q = raw.points[i]!;
-          km.push(km[i - 1]! + haversine({ lon: p[0]!, lat: p[1]! }, { lon: q[0]!, lat: q[1]! }) / 1000);
-        }
-        const ele = raw.points.map((p) => p[2] ?? 0);
-        const grade: number[] = [0];
-        for (let i = 1; i < raw.points.length; i++) {
-          const run = (km[i]! - km[i - 1]!) * 1000;
-          grade.push(run > 0 ? ((ele[i]! - ele[i - 1]!) / run) * 100 : 0);
-        }
-        // A profile written before surfaces were shipped simply has none, and
-        // "unknown" is exactly what that means.
-        const surface = raw.points.map(
-          (_, i) => SURFACES[raw.surfaces?.[i] ?? -1] ?? "unknown",
-        );
-        setProfile({ km, ele, grade, surface, at: raw.points.map((p) => [p[0]!, p[1]!]) });
-      })
-      .catch(() => {
-        if (!cancelled) setProfile(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [elevationFile]);
   const month = useMemo(
     () => plan?.months.find((m) => m.key === monthKey) ?? plan?.months[0] ?? null,
     [plan, monthKey],
@@ -278,6 +249,10 @@ export function App() {
       setLive(null);
       return;
     }
+    routingRun.current?.abort();
+    setLiveRides({});
+    setRouting(null);
+
     let cancelled = false;
     setLive((previous) =>
       previous && sameHome(previous.home, current) && previous.monthKey === month.key
@@ -319,6 +294,49 @@ export function App() {
   // Everything the budget decides is re-decided here rather than read out of
   // the file, so the sliders move the map without re-routing anything. At the
   // plan's own settings this reproduces the file exactly.
+  /**
+   * Routes the live destinations, nearest first, filling them in as they land.
+   *
+   * Started deliberately rather than on every change: each station is a request
+   * to donated hardware, and a home moved three times while someone makes up
+   * their mind should not cost three hundred of them.
+   */
+  const routeAll = () => {
+    if (!plan || !live || live.querying) return;
+    const spec = plan.settings ? { id: "direct", label: "Direct", profile: "fastbike" } : null;
+    if (!spec) return;
+
+    routingRun.current?.abort();
+    const run = new AbortController();
+    routingRun.current = run;
+    setLiveRides({});
+
+    const candidates = live.destinations.map((destination) => ({
+      stationId: destination.stationId,
+      name: destination.name,
+      at: { lat: destination.lat, lon: destination.lon },
+      trainHours: destination.travelMinutes / 60,
+      crowKm: haversine(current.rideTo, destination) / 1000,
+    }));
+
+    void routeNearestFirst(
+      candidates,
+      current.rideTo,
+      spec,
+      {
+        baseUrl: plan.settings.brouterUrl || BROUTER_FALLBACK,
+        effort: { curves },
+        budget,
+        trainHours: 0,
+        profileStepMetres: 100,
+      },
+      (stationId, variant) =>
+        setLiveRides((rides) => ({ ...rides, [stationId]: [variant] })),
+      setRouting,
+      run.signal,
+    );
+  };
+
   // Off the plan's own home there are no routed rides yet, so the list is the
   // train half only. `reckon` needs rides to judge anything, so it is not asked.
   const reckoned = useMemo(
@@ -333,10 +351,55 @@ export function App() {
     ? (live?.destinations ?? [])
     : (reckoned?.destinations ?? []);
 
+  const shownRides = offPlan ? liveRides : (reckoned?.rides ?? {});
+
   const corridors = useMemo(
-    () => groupIntoCorridors(shownDestinations, reckoned?.rides ?? {}),
-    [shownDestinations, reckoned],
+    () => groupIntoCorridors(shownDestinations, shownRides),
+    [shownDestinations, shownRides],
   );
+
+  const elevationFile = selected
+    ? ((shownRides[selected] ?? []).find((v) => v.id === variantId) ??
+        (shownRides[selected] ?? []).find((v) => v.feasible) ??
+        (shownRides[selected] ?? [])[0])?.elevationFile ?? null
+    : null;
+
+  useEffect(() => {
+    if (!elevationFile) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`./data/profiles/${elevationFile}`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((raw: { step: number; points: number[][]; surfaces?: number[] }) => {
+        if (cancelled) return;
+        const km: number[] = [0];
+        for (let i = 1; i < raw.points.length; i++) {
+          const p = raw.points[i - 1]!;
+          const q = raw.points[i]!;
+          km.push(km[i - 1]! + haversine({ lon: p[0]!, lat: p[1]! }, { lon: q[0]!, lat: q[1]! }) / 1000);
+        }
+        const ele = raw.points.map((p) => p[2] ?? 0);
+        const grade: number[] = [0];
+        for (let i = 1; i < raw.points.length; i++) {
+          const run = (km[i]! - km[i - 1]!) * 1000;
+          grade.push(run > 0 ? ((ele[i]! - ele[i - 1]!) / run) * 100 : 0);
+        }
+        // A profile written before surfaces were shipped simply has none, and
+        // "unknown" is exactly what that means.
+        const surface = raw.points.map(
+          (_, i) => SURFACES[raw.surfaces?.[i] ?? -1] ?? "unknown",
+        );
+        setProfile({ km, ele, grade, surface, at: raw.points.map((p) => [p[0]!, p[1]!]) });
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [elevationFile]);
 
   // Selection usually comes from clicking the map, so bring the matching row
   // into view rather than leaving it somewhere down an unscrolled list.
@@ -366,7 +429,7 @@ export function App() {
   }
 
   const { settings, home } = load.plan;
-  const rides = reckoned?.rides ?? {};
+  const rides = shownRides;
 
   // A plan.json built before speed became a curve carries the two scalars it
   // used instead. Read them rather than crashing on a missing curve: the page
@@ -484,17 +547,44 @@ export function App() {
         )}
 
         {offPlan && (
-          <p className="off-plan">
-            {live?.querying
-              ? "Asking the timetable…"
-              : `${shownDestinations.length} stations reachable by train${
-                  live && live.outOfRange > 0
-                    ? `, ${live.outOfRange} more too far to ride back from`
-                    : ""
-                }.`}{" "}
-            No ride home has been routed from here yet — the distances and
-            gradients below belong to <strong>{builtHome.name}</strong>.
-          </p>
+          <div className="off-plan">
+            <p>
+              {live?.querying
+                ? "Asking the timetable…"
+                : `${shownDestinations.length} stations reachable by train${
+                    live && live.outOfRange > 0
+                      ? `, ${live.outOfRange} beyond any ride home`
+                      : ""
+                  }.`}
+            </p>
+            {routing === null ? (
+              <>
+                <p>
+                  Nothing is routed from here yet, so there are no distances or
+                  gradients. Finding them is one request to brouter.de per
+                  station, a second apart.
+                </p>
+                <button
+                  type="button"
+                  className="settings-reset"
+                  onClick={routeAll}
+                  disabled={live === null || live.querying || shownDestinations.length === 0}
+                >
+                  Route {shownDestinations.length} rides home
+                </button>
+              </>
+            ) : (
+              <p>
+                {routing.done < routing.total
+                  ? `Routing, nearest first — ${routing.done} of ${routing.total}.`
+                  : `Routed ${routing.total - routing.failed.length} of ${routing.total}.`}
+                {routing.failed.length > 0 &&
+                  ` No route home from ${routing.failed.slice(0, 3).join(", ")}${
+                    routing.failed.length > 3 ? ` and ${routing.failed.length - 3} more` : ""
+                  }.`}
+              </p>
+            )}
+          </div>
         )}
 
         {settingsOpen && (
@@ -633,6 +723,7 @@ export function App() {
           plan={load.plan}
           home={current}
           placing={placing}
+          reachKm={offPlan ? maxRideKm(0, budget, { curves }) : null}
           onPlace={(at) => {
             setPicked({ ...current, rideTo: at });
             setPlacing(false);

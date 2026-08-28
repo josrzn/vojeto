@@ -106,7 +106,12 @@ createServer((request, response) => {
     ]),
   ];
 
-  response.writeHead(200, { "Content-Type": "application/json" });
+  // brouter.de sends this, so a page can route directly; the stub must too
+  // or the browser refuses the response before anything can read it.
+  response.writeHead(200, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+  });
   response.end(
     JSON.stringify({
       type: "FeatureCollection",

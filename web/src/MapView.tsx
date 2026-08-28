@@ -33,6 +33,14 @@ interface Props {
   home: Home;
   /** Waiting for a click to place the ride-to point. */
   placing: boolean;
+  /**
+   * Radius of the ring around the ride-to point, in km, or null to hide it.
+   *
+   * The furthest the budget could put you if the train took no time at all.
+   * Nothing beyond it is reachable whatever train you catch, which is why the
+   * map stops offering stations there.
+   */
+  reachKm: number | null;
   onSelect: (stationId: string | null) => void;
   /** A map click while placing, in [lon, lat]. */
   onPlace: (at: Point) => void;
@@ -46,6 +54,7 @@ const HOVER_SOURCE = "route-hover";
 const STATIONS_SOURCE = "stations";
 const ROUTE_SOURCE = "route";
 const STAGES_SOURCE = "stages";
+const REACH_SOURCE = "reach";
 
 export function MapView({
   plan,
@@ -53,6 +62,7 @@ export function MapView({
   selected,
   home,
   placing,
+  reachKm,
   onPlace,
   variant,
   frontierHours,
@@ -181,6 +191,22 @@ export function MapView({
             "line-width": 3,
             "line-opacity": 0.95,
             "line-dasharray": [2, 1.5],
+          },
+        });
+        instance.addSource(REACH_SOURCE, { type: "geojson", data: emptyCollection() });
+        instance.addLayer({
+          id: "reach-line",
+          type: "line",
+          source: REACH_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            // The same neutral grey as the personal frontier, and finer: this is
+            // the outer bound of the search rather than a fact about any ride,
+            // and it must not compete with the stations inside it.
+            "line-color": "#52514e",
+            "line-width": 1.5,
+            "line-opacity": 0.55,
+            "line-dasharray": [4, 3],
           },
         });
         instance.addSource(STATIONS_SOURCE, { type: "geojson", data: emptyCollection() });
@@ -435,6 +461,18 @@ export function MapView({
     paint();
   }, [ready, home, destinations, selected]);
 
+  // The edge of what the budget could reach, drawn around the ride-to point.
+  useEffect(() => {
+    const instance = map.current;
+    if (!ready || !instance) return;
+    const source = instance.getSource(REACH_SOURCE) as GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData({
+      type: "FeatureCollection",
+      features: reachKm === null ? [] : [circle(home.rideTo, reachKm)],
+    });
+  }, [ready, home.rideTo, reachKm]);
+
   // The continuous ride-time-home backdrop.
   useEffect(() => {
     const instance = map.current;
@@ -647,6 +685,32 @@ async function resolveStyle(
     console.warn(`Map style ${url} is unreachable; falling back to a plain background.`);
     return { spec: OFFLINE_STYLE, hasGlyphs: false };
   }
+}
+
+/**
+ * A circle of `radiusKm` around a point, as a polygon ring.
+ *
+ * Drawn in degrees rather than projected: over the couple of hundred kilometres
+ * this is ever asked for, scaling longitude by the cosine of the latitude is
+ * within a few hundred metres of true, and the line is a bound with fifteen
+ * percent of deliberate slack in it already.
+ */
+function circle(centre: { lat: number; lon: number }, radiusKm: number): Feature {
+  const latDegrees = radiusKm / 110.574;
+  const lonDegrees = radiusKm / (110.574 * Math.cos((centre.lat * Math.PI) / 180));
+  const ring: number[][] = [];
+  for (let i = 0; i <= 96; i++) {
+    const angle = (i / 96) * Math.PI * 2;
+    ring.push([
+      centre.lon + Math.cos(angle) * lonDegrees,
+      centre.lat + Math.sin(angle) * latDegrees,
+    ]);
+  }
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates: [ring] },
+  };
 }
 
 function point(lon: number, lat: number, properties: Record<string, unknown>): Feature {

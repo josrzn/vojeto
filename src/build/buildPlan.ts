@@ -64,6 +64,14 @@ export interface Plan {
     maxTransferMinutes: number;
     dayType: string;
     mapStyleUrl: string;
+    /**
+     * Where to route, for rides the browser asks for itself.
+     *
+     * Shipped rather than hardcoded so that pointing at a self-hosted BRouter
+     * is a config change: the public instance is donated hardware, and growing
+     * past what is polite to ask of it should not need a code change.
+     */
+    brouterUrl: string;
   };
   months: Array<{ key: string; label: string; date: string; destinations: PlanDestination[] }>;
   /** Keyed by station id and shared across months: the ride home never changes. */
@@ -321,6 +329,7 @@ export async function buildPlan(
       maxTransferMinutes: config.trip.maxTransferSeconds / 60,
       dayType: config.dayType,
       mapStyleUrl: config.map.styleUrl,
+      brouterUrl: config.ride.brouterUrl,
     },
     months,
     rides,
