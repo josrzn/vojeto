@@ -305,7 +305,7 @@ export function MapView({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             // Falls back to the ride's own colour until the elevation arrives.
-            "line-color": ["coalesce", ["get", "color"], "#cc373f"],
+            "line-color": ["coalesce", ["get", "color"], "#861e1d"],
             "line-width": 3.5,
           },
         });
@@ -314,8 +314,10 @@ export function MapView({
           type: "circle",
           source: HOVER_SOURCE,
           paint: {
+            // Brighter than any step of the map ramp, so the point you are
+            // hovering in the chart stands out from the line it sits on.
             "circle-radius": 6,
-            "circle-color": "#811d22",
+            "circle-color": "#e8322f",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2.5,
           },

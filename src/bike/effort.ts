@@ -105,7 +105,11 @@ export function fitsBudget(trainHours: number, hours: number, budget: Budget): F
   const overruns = (slackHours: number): Feasibility => ({
     feasible: false,
     verdict: "overruns",
-    days: Infinity,
+    // How long it would take if you allowed it, which is a fact about the ride
+    // rather than about the budget. This used to be Infinity, meaning "no
+    // number of days you have allowed will do" — true of the verdict, but not
+    // a number, and it reached the screen as "Infinity days".
+    days: daysNeeded(hours, trainHours, budget),
     slackHours,
     // What the whole outing would take if you simply allowed the time.
     neededBudgetHours: trainHours + hours,
@@ -127,7 +131,7 @@ export function fitsBudget(trainHours: number, hours: number, budget: Budget): F
   const remaining = hours - firstDay;
   const extraDays = Math.ceil(remaining / budget.hoursPerDay - EPSILON);
   const days = 1 + extraDays;
-  if (days > budget.maxDays) return { ...overruns(firstDay - hours), days };
+  if (days > budget.maxDays) return overruns(firstDay - hours);
   return {
     feasible: true,
     verdict: "fits",
@@ -135,6 +139,22 @@ export function fitsBudget(trainHours: number, hours: number, budget: Budget): F
     slackHours: extraDays * budget.hoursPerDay - remaining,
     neededBudgetHours: null,
   };
+}
+
+/**
+ * The days this ride would take at your pace, whatever you have allowed.
+ *
+ * Someone planning a single day still wants to be told that the way home is
+ * eight hours; being told it is "Infinity days" tells them only that a sentinel
+ * escaped. Where overnights are not on the table at all — one day allowed, or
+ * no riding hours given to later days — the answer is one day that does not
+ * fit, which is the truth and is what the rest of the panel then describes.
+ */
+function daysNeeded(hours: number, trainHours: number, budget: Budget): number {
+  if (budget.maxDays <= 1 || budget.hoursPerDay <= 0) return 1;
+  const firstDay = Math.max(0, budget.budgetHours - trainHours);
+  if (hours <= firstDay + EPSILON) return 1;
+  return 1 + Math.ceil((hours - firstDay) / budget.hoursPerDay - EPSILON);
 }
 
 /**

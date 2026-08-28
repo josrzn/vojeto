@@ -110,6 +110,35 @@ describe("fitsBudget", () => {
     expect(result.days).toBe(4);
   });
 
+  /**
+   * "Infinity days" reached the screen from here: the overrun case used it to
+   * mean "no number of days you have allowed will do". True of the verdict,
+   * useless as a number, and the panel printed it verbatim.
+   */
+  it("always says how many days a ride would take, as a number", () => {
+    const cases: Array<[number, number, Budget]> = [
+      [1, 6, dayTrip],
+      [6.5, 1, dayTrip],
+      [2, 8.4, { budgetHours: 10, maxDays: 1, hoursPerDay: 6, minHours: 3 }],
+      [1, 20, { budgetHours: 6, maxDays: 2, hoursPerDay: 6, minHours: 0 }],
+      [1, 9, { budgetHours: 6, maxDays: 1, hoursPerDay: 0, minHours: 0 }],
+    ];
+    for (const [trainHours, hours, budget] of cases) {
+      const result = fitsBudget(trainHours, hours, budget);
+      expect(Number.isFinite(result.days)).toBe(true);
+      expect(result.days).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("calls a one-day trip one day, even when it overruns", () => {
+    // The ride you were shown is a single day that is 25 minutes too long, not
+    // an unbounded expedition.
+    const day = { budgetHours: 10, maxDays: 1, hoursPerDay: 6, minHours: 3 };
+    const result = fitsBudget(2.07, 8.35, day);
+    expect(result.feasible).toBe(false);
+    expect(result.days).toBe(1);
+  });
+
   it("uses the exact boundary inclusively", () => {
     expect(fitsBudget(1, 5, dayTrip)).toEqual({
       feasible: true,

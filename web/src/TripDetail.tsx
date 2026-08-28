@@ -193,7 +193,18 @@ export function TripDetail({
                 {formatHours(active.brouterHours)}
               </p>
 
-              {active.days > 1 && (
+              {/* The split is part of the ride as it was measured; the number of
+                  days follows the budget on screen. Move the budget and they can
+                  disagree, and a stage list that does not add up to the days
+                  claimed above it is worse than no stage list. */}
+              {active.days > 1 && active.stages.length !== active.days && (
+                <p className="detail-note">
+                  Where to break the ride was worked out for the day this route
+                  was measured against, so it is not shown for this one.
+                </p>
+              )}
+
+              {active.days > 1 && active.stages.length === active.days && (
                 <ol className="stages">
                   {active.stages.map((stage) => (
                     <li key={stage.day}>

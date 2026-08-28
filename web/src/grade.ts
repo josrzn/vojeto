@@ -37,18 +37,38 @@ export const GRADE_LABELS = [
 ] as const;
 
 /**
- * The ramp as the map draws it, with descent folded back into the flat grey.
+ * The same scale as the map draws it, which is not the same colours.
  *
- * On the map the ride home is a thin stroke, often running within a few pixels
- * of the train's equally thin blue one, and a cool stroke there reads as a
- * second railway however far apart the two colours measure — the separation
- * thresholds assume marks with some area to them. In the profile the same
- * colour is a large filled region with nothing blue anywhere near it, so it
- * stays. The two surfaces carry their own keys, so neither contradicts itself.
+ * Two differences, both because a three-pixel line on a busy basemap is not a
+ * filled region on white paper.
+ *
+ * Descent is folded back into the neutral. On the map the ride home often runs
+ * within a few pixels of the train's equally thin blue line, and a cool stroke
+ * there reads as a second railway however far apart the two colours measure —
+ * the separation thresholds assume marks with some area to them. So the map
+ * ramp is not diverging at all: it runs neutral to steep, one hue.
+ *
+ * And every step is darker. The chart's light end is a large area on white and
+ * has all the contrast it needs; the same colour as a hairline over roads,
+ * fields and towns disappears, and on a typical ride two thirds of the line is
+ * that one step. These are stepped from the same red at a lower lightness:
+ * monotone light to dark with a gap of at least 0.06 in OKLCH L between
+ * neighbours, the lightest clearing 4.4:1 against open land and 5:1 against a
+ * white road. The neutral was pushed darker still than legibility alone wanted,
+ * to clear the green of the station dots under simulated deuteranopia — at the
+ * green's own lightness the two collapse together, and 12.2 apart is the price
+ * of the line and the dots never being confusable.
+ *
+ * The map's own key is drawn from these, so what it shows is what is on screen.
  */
-export const MAP_GRADE_COLORS = GRADE_COLORS.map((color, band) =>
-  band === 0 ? GRADE_COLORS[1] : color,
-);
+export const MAP_GRADE_COLORS = [
+  "#816a65",
+  "#816a65",
+  "#8a453d",
+  "#861e1d",
+  "#700110",
+  "#52020d",
+] as const;
 
 /**
  * The surfaces, as their own small palette rather than more of the gradient ramp.
