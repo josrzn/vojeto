@@ -9,6 +9,7 @@ import type {
 import { openMember } from "./archive.js";
 import { at, columnIndex, parseCsv } from "./csv.js";
 import { emptyCalendar } from "./calendar.js";
+import { deriveLookups } from "./lookups.js";
 import { diagnose, keepRoute, type RouteFilter, type RouteInfo } from "./routeFilter.js";
 import { keepStop, summariseKinds } from "./serviceKind.js";
 import { countServicesPerDate, plannableEnd } from "./coverage.js";
@@ -363,23 +364,10 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     pattern.trips.sort((a, b) => a.times[1]! - b.times[1]!);
   }
 
-  const patternsAtStop: number[][] = Array.from({ length: stops.length }, () => []);
-  for (const pattern of patterns) {
-    const seen = new Set<number>();
-    for (const stop of pattern.stops) {
-      if (seen.has(stop)) continue;
-      seen.add(stop);
-      patternsAtStop[stop]!.push(pattern.id);
-    }
-  }
-
-  const stopsInStation = new Map<string, number[]>();
-  for (let i = 0; i < stops.length; i++) {
-    const station = stops[i]!.station;
-    const group = stopsInStation.get(station);
-    if (group) group.push(i);
-    else stopsInStation.set(station, [i]);
-  }
+  // Derived here and again when a packed index is read back, from one
+  // implementation, so the browser cannot end up with a different view of the
+  // same feed than the planner has.
+  const { stopsInStation, patternsAtStop } = deriveLookups(stops, patterns);
 
   console.log(
     `Patterns: ${patterns.length} over ${stops.length} stops` +

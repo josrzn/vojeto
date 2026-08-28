@@ -576,6 +576,51 @@ That will not help where the route genuinely uses a way the importer lacks. The
 carry. If an importer still objects, letting it snap the route to its own
 network is the reasonable answer.
 
+## The timetable, packed for the browser
+
+`npm run ingest` writes the parsed timetable alongside the feed it came from:
+
+```
+public/data/timetable.json       structure: stops, patterns, trips, calendars
+public/data/timetable.times.bin  every call time, as one Int32Array
+```
+
+Parsing the feed costs a 4 MB zip and 378,000 CSV rows and takes seconds. That
+is fine once on a laptop and impossible on every page visit, so it happens once
+and the result is written out. On the real SNCF feed — 2,497 stops, 3,670
+patterns, 28,600 trips, 304,000 calls — that comes to:
+
+| | raw | over the wire |
+| --- | --- | --- |
+| `timetable.json` | 2.3 MB | 370 KB |
+| `timetable.times.bin` | 2.5 MB | 157 KB |
+| | | **527 KB** |
+
+`JSON.parse` of the structure takes about 11 ms. The raw figures matter only if
+you serve it without compression; the fixed-width times array is nearly all
+zero bytes and gzips sixteenfold.
+
+**Two files, split where the bytes are.** Times are three quarters of the index
+and the only part that wants to be a typed array — in memory an `Int32Array`
+costs a quarter of what the same numbers cost as a JS array, and RAPTOR reads
+each trip as a view onto the one shared buffer rather than a copy. Everything
+else stays JSON: small, compressible, and openable in an editor when something
+looks wrong. Hand-rolling a binary header for another hundred kilobytes would
+trade that away for exactly the class of bug — one field's offset out by one —
+that stays invisible until a single train has the wrong departure time.
+
+Times are seconds, in `Int32Array`, not minutes in a `Uint16Array`. Minutes
+would halve the raw size and silently round any feed that publishes seconds.
+
+**Nothing derived is stored.** `stopIndex`, `stopsInStation` and
+`patternsAtStop` are rebuilt on load by `deriveLookups` — the same function the
+parser calls, so the browser cannot end up with a different view of the feed
+than the planner has.
+
+The test that matters is that a packed index, put through `JSON.stringify` and
+read back, deep-equals the one that went in — every stop, every trip's times,
+every calendar, every derived lookup — and answers a RAPTOR query identically.
+
 ## Commands
 
 ```sh

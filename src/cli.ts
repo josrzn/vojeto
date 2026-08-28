@@ -1,7 +1,11 @@
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { gzip } from "node:zlib";
 import { loadConfig } from "./config.js";
 import { downloadFeed, listMembers } from "./gtfs/archive.js";
 import { loadTimetable } from "./gtfs/load.js";
+import { packTimetable } from "./gtfs/pack.js";
+import type { TimetableIndex } from "./shared/types.js";
 import { formatDate } from "./gtfs/time.js";
 import { buildPlan, writePlan } from "./build/buildPlan.js";
 import { resolveHome, searchStations } from "./build/stations.js";
@@ -15,6 +19,8 @@ const CACHE_DIR = path.join(DATA_DIR, "brouter-cache");
 const PLAN_FILE = path.join("public", "data", "plan.json");
 const GPX_DIR = path.join("public", "data", "gpx");
 const PROFILE_DIR = path.join("public", "data", "profiles");
+const TIMETABLE_FILE = path.join("public", "data", "timetable.json");
+const TIMETABLE_TIMES_FILE = path.join("public", "data", "timetable.times.bin");
 
 interface Flags {
   command: string;
@@ -62,6 +68,35 @@ async function feedPath(flags: Flags, url: string): Promise<string> {
   return downloadFeed(url, FEED_FILE, flags.maxAgeHours);
 }
 
+/**
+ * Writes the parsed timetable for the browser to read.
+ *
+ * Parsing the feed costs a 4 MB zip and several hundred thousand CSV rows, which
+ * is fine once on a laptop and not something a page can do on every visit. This
+ * is the same index, in a shape that loads in one JSON.parse and one fetch of a
+ * typed array.
+ */
+async function writeTimetable(index: TimetableIndex): Promise<void> {
+  const { meta, times } = packTimetable(index);
+  const json = JSON.stringify(meta);
+
+  await mkdir(path.dirname(TIMETABLE_FILE), { recursive: true });
+  await writeFile(TIMETABLE_FILE, json);
+  await writeFile(TIMETABLE_TIMES_FILE, Buffer.from(times.buffer, times.byteOffset, times.byteLength));
+
+  const kb = (bytes: number) =>
+    bytes < 10 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${Math.round(bytes / 1024)} KB`;
+  const gzipped = await new Promise<number>((resolve, reject) => {
+    gzip(json, (error, buffer) => (error ? reject(error) : resolve(buffer.byteLength)));
+  });
+  console.log(
+    `\nTimetable index: ${kb(json.length)} of structure (${kb(gzipped)} gzipped) ` +
+      `plus ${kb(times.byteLength)} of times, ` +
+      `${meta.strings.length.toLocaleString()} distinct strings`,
+  );
+  console.log(`  ${TIMETABLE_FILE}\n  ${TIMETABLE_TIMES_FILE}`);
+}
+
 async function main(): Promise<void> {
   const flags = parseArgs(process.argv.slice(2));
   const config = await loadConfig();
@@ -93,6 +128,8 @@ async function main(): Promise<void> {
           `${config.home.rideTo.lon.toFixed(5)}`,
       );
       console.log(`Sample dates: ${dates.map((d) => d.date).map(formatDate).join(", ")}`);
+
+      await writeTimetable(index);
       break;
     }
 
