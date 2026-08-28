@@ -1,49 +1,42 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
-import { SURFACES, type LoadedProfile } from "./grade.js";
+import type { LoadedProfile } from "./grade.js";
 import {
+  TOURING_CURVES,
   curveFromLinearModel,
   describeCurve,
   type SpeedCurve,
   type SpeedCurves,
 } from "../../src/bike/speed.js";
-import { haversine } from "../../src/shared/geo.js";
+import { toGpx, describeRide, slug } from "../../src/bike/gpx.js";
+import { sampleDates } from "../../src/build/dates.js";
 import { TripDetail } from "./TripDetail.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { HomePicker } from "./HomePicker.js";
 import { Timetable } from "./timetableClient.js";
-import type { Station } from "./timetableService.js";
-import { explore, quickestTrains, sameHome, type Home } from "./explore.js";
-import { routeNearestFirst, type Progress } from "./routeHome.js";
-import { maxRideKm } from "../../src/bike/effort.js";
-import { parseTime } from "../../src/gtfs/time.js";
-import { reckon } from "./budget.js";
-import type { Budget } from "../../src/bike/effort.js";
+import type { Loaded, Station } from "./timetableService.js";
+import { explore, quickestTrains, type Home } from "./explore.js";
+import { warmCache, withVariant, type Rides } from "./rides.js";
+import { routeRide } from "./routeHome.js";
+import type { BikeTrack } from "../../src/bike/track.js";
+import { preferred, stylesFrom, type RouteStyle } from "./routeStyles.js";
+import { profileFromPoints } from "./rideProfile.js";
 import {
-  bestVariant,
-  formatHours,
-  formatHoursCeil,
-  formatMinutes,
-  groupIntoCorridors,
-} from "./corridors.js";
-
-/**
- * How long ago the plan was generated.
- *
- * Shown because `npm run plan` writes into public/, which a built site only
- * picks up when it is rebuilt: a page that looks wrong is usually a page
- * showing an older plan than the one you just made.
- */
-function describeAge(generatedAt: string): string {
-  const minutes = Math.round((Date.now() - new Date(generatedAt).getTime()) / 60000);
-  if (!Number.isFinite(minutes)) return "at an unknown time";
-  if (minutes < 2) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return `${Math.round(hours / 24)} days ago`;
-}
+  budgetOf,
+  circleKm,
+  homeFromPlan,
+  mergeSettings,
+  queryFor,
+  readRecentHome,
+  rememberHome,
+  rememberSettings,
+  settingsFromPlan,
+  SETTINGS_KEY,
+  type Settings,
+} from "./settings.js";
+import { judge } from "./budget.js";
+import { bestVariant, formatHours, formatMinutes, groupIntoCorridors } from "./corridors.js";
 
 /** One curve used for every surface, which is what a plan without them meant. */
 const everySurface = (curve: SpeedCurve): SpeedCurves => ({
@@ -74,395 +67,333 @@ function useRemembered(key: string, fallback: boolean) {
 }
 
 /**
- * The budget the user is looking at, which is the plan's own until they say
- * otherwise.
- *
- * Held as "what the user chose, or nothing yet" rather than as a copy of the
- * plan's settings. A copy would have to be taken before the plan has loaded —
- * there is nothing to copy on the first render — and would then never catch up,
- * which showed as the view being marked "adjusted" when nobody had touched it.
- *
- * A remembered choice is clamped to the plan it is applied to on every render:
- * a budget wider than the file would promise stations that were never routed.
- */
-function useBudget(built: Budget) {
-  const [chosen, setChosen] = useState<Partial<Budget> | null>(readStoredBudget);
-
-  const budget = useMemo<Budget>(() => {
-    if (!chosen) return built;
-    return {
-      budgetHours: clamp(chosen.budgetHours, built.budgetHours),
-      minHours: clamp(chosen.minHours, Math.max(1, built.budgetHours / 2)),
-      maxDays: clamp(chosen.maxDays, built.maxDays),
-      hoursPerDay: clamp(chosen.hoursPerDay, built.hoursPerDay),
-    };
-  }, [chosen, built]);
-
-  const choose = (next: Budget) => {
-    setChosen(next);
-    try {
-      localStorage.setItem("vojeto.budget", JSON.stringify(next));
-    } catch {
-      // A private window, or storage disabled: the choice holds for this
-      // session and no longer.
-    }
-  };
-  return [budget, choose] as const;
-}
-
-function readStoredBudget(): Partial<Budget> | null {
-  try {
-    const stored = localStorage.getItem("vojeto.budget");
-    return stored ? (JSON.parse(stored) as Partial<Budget>) : null;
-  } catch {
-    return null;
-  }
-}
-
-const clamp = (value: number | undefined, ceiling: number) =>
-  typeof value === "number" && Number.isFinite(value) ? Math.min(value, ceiling) : ceiling;
-
-/** Destinations found by querying the timetable here, rather than read from the file. */
-interface Live {
-  home: Home;
-  monthKey: string;
-  destinations: PlanDestination[];
-  outOfRange: number;
-  querying: boolean;
-}
-
-/**
- * Where the browser routes when the plan does not say.
+ * Where the browser routes when no plan says otherwise.
  *
  * The public instance, the same one `npm run plan` defaults to. It is donated
- * hardware, which is why routing starts on a click rather than on every change
- * of mind, and why requests go one at a time.
+ * hardware, which is why a route is asked for when you point at a station and
+ * not before.
  */
 const BROUTER_FALLBACK = "https://brouter.de/brouter";
 
-type Load =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; plan: Plan };
+/** A ride being fetched: which station, which way home. */
+interface Routing {
+  stationId: string;
+  styleId: string;
+}
 
 export function App() {
-  const [load, setLoad] = useState<Load>({ status: "loading" });
+  // The timetable is the app. A plan is an optional head start.
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [stations, setStations] = useState<Station[] | null>(null);
+  const [timetableError, setTimetableError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const timetable = useRef<Timetable | null>(null);
+
+  const [storedSettings, setStoredSettings] = useState<unknown>(() => readJson(SETTINGS_KEY));
+  const [picked, setPicked] = useState<Home | null>(readRecentHome);
+
   const [monthKey, setMonthKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [openCorridors, setOpenCorridors] = useState<Set<string>>(new Set());
-  const [showMisses, setShowMisses] = useState(false);
   const [showField, setShowField] = useState(true);
   const [showNoTrain, setShowNoTrain] = useState(false);
   const [showFrontier, setShowFrontier] = useState(false);
-  const [profile, setProfile] = useState<LoadedProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useRemembered("vojeto.sidebar", true);
+  const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [homeOpen, setHomeOpen] = useState(false);
   const [placing, setPlacing] = useState(false);
-  const [picked, setPicked] = useState<Home | null>(null);
-  const [stations, setStations] = useState<Station[] | null>(null);
-  const [timetableError, setTimetableError] = useState<string | null>(null);
-  const [live, setLive] = useState<Live | null>(null);
-  const [liveRides, setLiveRides] = useState<Record<string, PlanRideVariant[]>>({});
-  const [routing, setRouting] = useState<Progress | null>(null);
-  const timetable = useRef<Timetable | null>(null);
-  const routingRun = useRef<AbortController | null>(null);
-  const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
-  const selectedRow = useRef<HTMLLIElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
+  const [destinations, setDestinations] = useState<PlanDestination[]>([]);
+  const [outOfRange, setOutOfRange] = useState(0);
+  const [querying, setQuerying] = useState(false);
+  const [rides, setRides] = useState<Rides>({});
+  const [profiles, setProfiles] = useState<Record<string, LoadedProfile>>({});
+  const [routing, setRouting] = useState<Routing | null>(null);
+  const [rideError, setRideError] = useState<string | null>(null);
+  const tracks = useRef(new Map<string, BikeTrack>());
+  const routeRun = useRef<AbortController | null>(null);
+  const selectedRow = useRef<HTMLLIElement | null>(null);
+
+  // Both loads start at once and neither blocks the other: the timetable is
+  // what the page needs, the plan is what it would like.
   useEffect(() => {
     let cancelled = false;
-    fetch("./data/plan.json")
-      .then((response) => {
-        if (!response.ok) throw new Error(`plan.json returned HTTP ${response.status}`);
-        return response.json() as Promise<Plan>;
-      })
-      .then((plan) => {
-        if (cancelled) return;
-        setLoad({ status: "ready", plan });
-        setMonthKey(plan.months[0]?.key ?? null);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setLoad({ status: "error", message: error instanceof Error ? error.message : String(error) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const plan = load.status === "ready" ? load.plan : null;
-
-  const built: Budget = useMemo(
-    () => ({
-      budgetHours: plan?.settings.budgetHours ?? 10,
-      minHours: plan?.settings.minRideHours ?? 0,
-      maxDays: plan?.settings.maxDays ?? 1,
-      hoursPerDay: plan?.settings.hoursPerDay ?? 6,
-    }),
-    [plan],
-  );
-  const [budget, setBudget] = useBudget(built);
-
-  const builtHome: Home = useMemo(
-    () => ({
-      stationId: plan?.home.station.stationId ?? "",
-      name: plan?.home.station.name ?? "",
-      at: { lat: plan?.home.station.lat ?? 0, lon: plan?.home.station.lon ?? 0 },
-      rideTo: plan?.home.rideTo ?? { lat: 0, lon: 0 },
-    }),
-    [plan],
-  );
-  const current = picked ?? builtHome;
-  const offPlan = plan !== null && !sameHome(current, builtHome);
-
-  // The timetable is 800 KB and only wanted by someone who is going to move the
-  // home, so it is fetched when the picker is first opened rather than on load.
-  useEffect(() => {
-    if (!homeOpen || timetable.current) return;
     const client = new Timetable();
     timetable.current = client;
     client
       .load()
-      .then((loaded) => setStations(loaded.stations))
-      .catch((error: unknown) =>
-        setTimetableError(error instanceof Error ? error.message : String(error)),
-      );
-  }, [homeOpen]);
+      .then((it) => {
+        if (cancelled) return;
+        setLoaded(it);
+        setStations(it.stations);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setTimetableError(message(error));
+      });
 
+    fetch("./data/plan.json")
+      .then((response) => (response.ok ? (response.json() as Promise<Plan>) : null))
+      .then((it) => {
+        if (!cancelled && it) setPlan(it);
+      })
+      .catch(() => {
+        // No plan is the ordinary case for a fresh checkout, and nothing here
+        // needs one. Silence is the right amount of noise about it.
+      });
 
-  // Elevation is fetched per variant rather than shipped in plan.json: at ~10 KB
-  // each, all of them together would be several megabytes for data you only look
-  // at one variant at a time.
-  const month = useMemo(
-    () => plan?.months.find((m) => m.key === monthKey) ?? plan?.months[0] ?? null,
-    [plan, monthKey],
+    return () => {
+      cancelled = true;
+      client.terminate();
+    };
+  }, []);
+
+  // The settings on screen: what you chose, over what the plan was built with,
+  // over the defaults. Held this way rather than as a copy taken on the first
+  // render — there is nothing to copy before the plan has loaded, and a copy
+  // would never catch up.
+  const settings = useMemo(
+    () => mergeSettings(settingsFromPlan(plan), storedSettings),
+    [plan, storedSettings],
   );
+  const chooseSettings = (next: Settings) => {
+    setStoredSettings(next);
+    rememberSettings(next);
+  };
 
-  // Re-query whenever the home or the month moves off the plan. The plan's own
-  // home needs no query: its answers are in the file, with rides attached.
+  const curves = useMemo((): SpeedCurves => {
+    // A plan.json built before speed became a curve carries the two scalars it
+    // used instead; read them rather than crash, so the page shows the numbers
+    // that plan was actually built with until it is rebuilt.
+    const s = plan?.settings as
+      | Partial<{ speedByGradient: SpeedCurves | SpeedCurve; speedKmh: number; climbMetresPerHour: number }>
+      | undefined;
+    if (!s) return TOURING_CURVES;
+    const shipped = s.speedByGradient;
+    if (!shipped) {
+      return everySurface(curveFromLinearModel(s.speedKmh ?? 16, s.climbMetresPerHour ?? 600));
+    }
+    return Array.isArray(shipped) ? everySurface(shipped as SpeedCurve) : (shipped as SpeedCurves);
+  }, [plan]);
+
+  const effort = useMemo(() => ({ curves }), [curves]);
+  const budget = useMemo(() => budgetOf(settings), [settings]);
+  const radiusKm = useMemo(() => circleKm(settings, effort), [settings, effort]);
+  const styles = useMemo(() => stylesFrom(plan), [plan]);
+  const style = preferred(styles, settings.style);
+  const brouterUrl = plan?.settings.brouterUrl || BROUTER_FALLBACK;
+
+  // Where you are starting from and finishing: the last pair you asked about,
+  // or the one a plan was built for. Never a place written into the code.
+  const home = picked ?? homeFromPlan(plan);
+  const pickHome = (next: Home) => {
+    setPicked(next);
+    rememberHome(next);
+    setSelected(null);
+    setPlacing(false);
+  };
+
+  const months = useMemo(
+    () => (loaded ? sampleDates(loaded.feedStart, loaded.plannableEnd, settings.dayType) : []),
+    [loaded, settings.dayType],
+  );
+  const month = months.find((m) => m.key === monthKey) ?? months[0] ?? null;
+
+  // Ways home already known: a plan built for this very pair, or nothing.
+  // Rebuilt from scratch whenever the pair changes, because every ride in it
+  // was measured to a door that has just moved.
+  const homeKey = home ? `${home.stationId}|${home.rideTo.lat}|${home.rideTo.lon}` : "";
+  useEffect(() => {
+    routeRun.current?.abort();
+    tracks.current.clear();
+    setRides(warmCache(plan, home));
+    setProfiles({});
+    setRouting(null);
+    setRideError(null);
+    // `home` is rebuilt each render; the identity that matters is the pair's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, homeKey]);
+
+  // The candidates: everywhere the train gets you in time, inside the circle.
   useEffect(() => {
     const client = timetable.current;
-    if (!plan || !month || !client || !offPlan) {
-      setLive(null);
-      return;
-    }
-    routingRun.current?.abort();
-    setLiveRides({});
-    setRouting(null);
+    if (!client || !home || !month || !loaded) return;
 
     let cancelled = false;
-    setLive((previous) =>
-      previous && sameHome(previous.home, current) && previous.monthKey === month.key
-        ? { ...previous, querying: true }
-        : { home: current, monthKey: month.key, destinations: [], outOfRange: 0, querying: true },
-    );
-
+    setQuerying(true);
     client
-      .reachable({
-        date: Number(month.date.replaceAll("-", "")),
-        origin: current.stationId,
-        earliestDeparture: 5 * 3600,
-        arriveBy: parseTime(plan.settings.arriveBy),
-        arriveNoEarlierThan: 6 * 3600,
-        maxTravelSeconds: 4 * 3600,
-        maxTransfers: plan.settings.maxTransfers,
-        minTransferSeconds: plan.settings.minTransferMinutes * 60,
-        maxTransferSeconds: plan.settings.maxTransferMinutes * 60,
-      })
+      .reachable(queryFor(home, month.date, settings))
       .then((itineraries) => {
         if (cancelled) return;
-        const found = explore(itineraries, current.rideTo, budget, { curves });
-        setLive({ home: current, monthKey: month.key, ...found, querying: false });
+        const found = explore(itineraries, home.rideTo, radiusKm);
+        setDestinations(found.destinations);
+        setOutOfRange(found.outOfRange);
+        setQuerying(false);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setTimetableError(error instanceof Error ? error.message : String(error));
-        setLive(null);
+        setTimetableError(message(error));
+        setQuerying(false);
       });
-
     return () => {
       cancelled = true;
     };
-    // `current` and `curves` are rebuilt each render; the identity that matters
-    // is the home's own, which sameHome decides.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan, month?.key, offPlan, current.stationId, current.rideTo.lat, current.rideTo.lon, budget]);
+  }, [loaded, homeKey, month?.date, radiusKm, settings.arriveBy, settings.arriveNoEarlierThan,
+      settings.earliestDeparture, settings.maxTravelMinutes, settings.maxTransfers,
+      settings.minTransferMinutes, settings.maxTransferMinutes]);
 
-  // Everything the budget decides is re-decided here rather than read out of
-  // the file, so the sliders move the map without re-routing anything. At the
-  // plan's own settings this reproduces the file exactly.
+  const trainHours = useMemo(() => quickestTrains(destinations), [destinations]);
+
   /**
-   * Routes the live destinations, nearest first, filling them in as they land.
+   * Fetches one way home from one station.
    *
-   * Started deliberately rather than on every change: each station is a request
-   * to donated hardware, and a home moved three times while someone makes up
-   * their mind should not cost three hundred of them.
+   * The whole of the app's talking to BRouter, and it happens because you
+   * pointed at something. Aborted when the door moves: a route to a doorway you
+   * have left is not worth waiting for.
    */
-  const routeAll = () => {
-    if (!plan || !live || live.querying) return;
-    const spec = plan.settings ? { id: "direct", label: "Direct", profile: "fastbike" } : null;
-    if (!spec) return;
+  const route = useCallback(
+    (destination: PlanDestination, wanted: RouteStyle) => {
+      if (!home) return;
+      // Whatever was in flight was for a station you have moved on from.
+      routeRun.current?.abort();
+      const run = new AbortController();
+      routeRun.current = run;
+      setRouting({ stationId: destination.stationId, styleId: wanted.id });
+      setRideError(null);
 
-    routingRun.current?.abort();
-    const run = new AbortController();
-    routingRun.current = run;
-    setLiveRides({});
+      void routeRide(
+        {
+          from: { lat: destination.lat, lon: destination.lon },
+          rideTo: home.rideTo,
+          style: wanted,
+          trainHours: trainHours[destination.stationId] ?? destination.travelMinutes / 60,
+        },
+        {
+          baseUrl: brouterUrl,
+          effort,
+          budget,
+          trainHours: 0,
+          profileStepMetres: 100,
+        },
+        run.signal,
+      )
+        .then((routed) => {
+          if (run.signal.aborted) return;
+          tracks.current.set(`${destination.stationId}|${wanted.id}`, routed.track);
+          setProfiles((all) => ({
+            ...all,
+            [`${destination.stationId}|${wanted.id}`]: routed.profile,
+          }));
+          setRides((all) => withVariant(all, destination.stationId, routed.variant));
+          setRouting(null);
+        })
+        .catch((error: unknown) => {
+          if (run.signal.aborted) return;
+          setRideError(`${wanted.label}: ${message(error)}`);
+          setRouting(null);
+        });
+    },
+    [home, trainHours, brouterUrl, effort, budget],
+  );
 
-    const candidates = live.destinations.map((destination) => ({
-      stationId: destination.stationId,
-      name: destination.name,
-      at: { lat: destination.lat, lon: destination.lon },
-      trainHours: destination.travelMinutes / 60,
-      crowKm: haversine(current.rideTo, destination) / 1000,
-    }));
+  const chosen = destinations.find((d) => d.stationId === selected) ?? null;
 
-    void routeNearestFirst(
-      candidates,
-      current.rideTo,
-      spec,
-      {
-        baseUrl: plan.settings.brouterUrl || BROUTER_FALLBACK,
-        effort: { curves },
+  // Pointing at a station is the whole request: one route, the preferred way
+  // home, and nothing else until you ask for more.
+  useEffect(() => {
+    if (!chosen) return;
+    if (rides[chosen.stationId]?.some((v) => v.id === style.id)) return;
+    route(chosen, style);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosen?.stationId, style.id]);
+
+  const judged = chosen
+    ? judge(
+        rides[chosen.stationId] ?? [],
+        trainHours[chosen.stationId] ?? chosen.travelMinutes / 60,
         budget,
-        trainHours: 0,
-        profileStepMetres: 100,
-      },
-      (stationId, variant) =>
-        setLiveRides((rides) => ({ ...rides, [stationId]: [variant] })),
-      setRouting,
-      run.signal,
-    );
+      )
+    : null;
+  const variants = judged?.variants ?? [];
+  const active = variants.find((v) => v.id === variantId) ?? bestVariant(variants) ?? null;
+
+  const remaining = styles.filter((s) => !variants.some((v) => v.id === s.id));
+  const routeMore = (wanted: RouteStyle) => {
+    if (chosen && !routing) route(chosen, wanted);
   };
 
-  // Off the plan's own home there are no routed rides yet, so the list is the
-  // train half only. `reckon` needs rides to judge anything, so it is not asked.
-  const reckoned = useMemo(
-    () =>
-      plan && month && !offPlan
-        ? reckon(month.destinations, plan.rides, plan.trainHours ?? {}, budget)
-        : null,
-    [plan, month, budget, offPlan],
-  );
-
-  const shownDestinations = offPlan
-    ? (live?.destinations ?? [])
-    : (reckoned?.destinations ?? []);
-
-  const shownRides = offPlan ? liveRides : (reckoned?.rides ?? {});
-
-  const corridors = useMemo(
-    () => groupIntoCorridors(shownDestinations, shownRides),
-    [shownDestinations, shownRides],
-  );
-
-  const elevationFile = selected
-    ? ((shownRides[selected] ?? []).find((v) => v.id === variantId) ??
-        (shownRides[selected] ?? []).find((v) => v.feasible) ??
-        (shownRides[selected] ?? [])[0])?.elevationFile ?? null
-    : null;
+  // The chart for the ride on screen: made here when the ride was routed here,
+  // fetched when it came out of a plan, which writes profiles to disk.
+  const profileKey = chosen && active ? `${chosen.stationId}|${active.id}` : null;
+  const profile = profileKey ? (profiles[profileKey] ?? null) : null;
+  const elevationFile = active?.elevationFile ?? null;
 
   useEffect(() => {
-    if (!elevationFile) {
-      setProfile(null);
-      return;
-    }
+    if (!profileKey || !elevationFile || profiles[profileKey]) return;
     let cancelled = false;
-    fetch(`./data/profiles/${elevationFile}`)
+    void fetch(`./data/profiles/${elevationFile}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((raw: { step: number; points: number[][]; surfaces?: number[] }) => {
+      .then((raw: { points: number[][]; surfaces?: number[] }) => {
         if (cancelled) return;
-        const km: number[] = [0];
-        for (let i = 1; i < raw.points.length; i++) {
-          const p = raw.points[i - 1]!;
-          const q = raw.points[i]!;
-          km.push(km[i - 1]! + haversine({ lon: p[0]!, lat: p[1]! }, { lon: q[0]!, lat: q[1]! }) / 1000);
-        }
-        const ele = raw.points.map((p) => p[2] ?? 0);
-        const grade: number[] = [0];
-        for (let i = 1; i < raw.points.length; i++) {
-          const run = (km[i]! - km[i - 1]!) * 1000;
-          grade.push(run > 0 ? ((ele[i]! - ele[i - 1]!) / run) * 100 : 0);
-        }
-        // A profile written before surfaces were shipped simply has none, and
-        // "unknown" is exactly what that means.
-        const surface = raw.points.map(
-          (_, i) => SURFACES[raw.surfaces?.[i] ?? -1] ?? "unknown",
-        );
-        setProfile({ km, ele, grade, surface, at: raw.points.map((p) => [p[0]!, p[1]!]) });
+        setProfiles((all) => ({ ...all, [profileKey]: profileFromPoints(raw.points, raw.surfaces) }));
       })
       .catch(() => {
-        if (!cancelled) setProfile(null);
+        // The plan's profile directory is optional; the ride is still shown.
       });
     return () => {
       cancelled = true;
     };
-  }, [elevationFile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileKey, elevationFile]);
 
-  // Selection usually comes from clicking the map, so bring the matching row
-  // into view rather than leaving it somewhere down an unscrolled list.
+  // A ride routed here has no file to download, so the .gpx is built in the
+  // page from the track it was routed with and handed over as a blob.
+  const [gpxUrl, setGpxUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const track = profileKey ? tracks.current.get(profileKey) : null;
+    if (!track || !chosen || !active || !home) {
+      setGpxUrl(null);
+      return;
+    }
+    const xml = toGpx({
+      name: `${chosen.name} → ${home.name}`,
+      description: describeRide(active),
+      coordinates: track.coordinates,
+    });
+    const url = URL.createObjectURL(new Blob([xml], { type: "application/gpx+xml" }));
+    setGpxUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [profileKey, chosen, active, home]);
+
+  const corridors = useMemo(() => groupIntoCorridors(destinations, rides), [destinations, rides]);
+
   useEffect(() => {
     selectedRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selected]);
 
-  // Keep the selection only while it exists in the month being shown.
   useEffect(() => {
-    if (!selected) return;
-    const stillThere = corridors.some((c) => c.destinations.some((d) => d.stationId === selected));
-    if (!stillThere) setSelected(null);
-  }, [corridors, selected]);
+    if (selected && !destinations.some((d) => d.stationId === selected)) setSelected(null);
+  }, [destinations, selected]);
 
-  if (load.status === "loading") return <div className="splash">Loading…</div>;
-
-  if (load.status === "error") {
+  if (timetableError && !loaded) {
     return (
       <div className="splash">
-        <h1>No plan yet</h1>
-        <p className="splash-detail">{load.message}</p>
+        <h1>No timetable yet</h1>
+        <p className="splash-detail">{timetableError}</p>
         <p>
-          Build one with <code>npm run ingest</code>, then <code>npm run plan</code>.
+          Build one with <code>npm run ingest</code>.
         </p>
       </div>
     );
   }
 
-  const { settings, home } = load.plan;
-  const rides = shownRides;
+  if (!loaded) return <div className="splash">Reading the timetable…</div>;
 
-  // A plan.json built before speed became a curve carries the two scalars it
-  // used instead. Read them rather than crashing on a missing curve: the page
-  // then shows the numbers that plan was actually built with, which is the
-  // truthful thing to do until it is rebuilt.
-  const legacy = settings as Partial<{ speedKmh: number; climbMetresPerHour: number }>;
-  const shipped: SpeedCurves | SpeedCurve | undefined = settings.speedByGradient;
-  const curves: SpeedCurves = !shipped
-    ? everySurface(curveFromLinearModel(legacy.speedKmh ?? 16, legacy.climbMetresPerHour ?? 600))
-    : Array.isArray(shipped)
-      ? everySurface(shipped as SpeedCurve)
-      : (shipped as SpeedCurves);
-  const chosen =
-    corridors.flatMap((c) => c.destinations).find((d) => d.stationId === selected) ?? null;
-  const variants = chosen ? (rides[chosen.stationId] ?? []) : [];
-  const activeVariant =
-    variants.find((v) => v.id === variantId) ?? bestVariant(variants) ?? null;
-
-  const stationCount = corridors.reduce((n, c) => n + c.destinations.length, 0);
-
-  // Stations the train reaches but the ride home overruns, cheapest first, so
-  // the budget needed to bring one in is visible rather than guessed at.
-  const narrowed =
-    budget.budgetHours !== built.budgetHours ||
-    budget.minHours !== built.minHours ||
-    budget.maxDays !== built.maxDays ||
-    budget.hoursPerDay !== built.hoursPerDay;
-
-  const seen = new Set<string>();
-  const outOfReach = [...(reckoned?.rejected ?? []), ...load.plan.rejected]
-    .filter((r) => r.verdict === "overruns" && r.neededBudgetHours !== null)
-    .filter((r) => (seen.has(r.stationId) ? false : seen.add(r.stationId)))
-    .sort((a, b) => a.neededBudgetHours! - b.neededBudgetHours!);
+  const stationCount = destinations.length;
+  const gpxName = chosen && active ? `${slug(chosen.name)}-${slug(active.id)}.gpx` : "ride.gpx";
 
   const toggleCorridor = (name: string) =>
     setOpenCorridors((open) => {
@@ -492,52 +423,59 @@ export function App() {
               className="settings-open"
               onClick={() => setHomeOpen((open) => !open)}
               aria-expanded={homeOpen}
+              title="The station you leave from and the door you ride back to"
             >
-              {offPlan ? "start · moved" : "start"}
+              {home ? `${home.name} → home` : "Choose where you live"}
             </button>
             <button
               type="button"
               className="settings-open"
               onClick={() => setSettingsOpen((open) => !open)}
               aria-expanded={settingsOpen}
+              title="Your trains, your day, how far to look"
             >
-              {narrowed ? "your day · adjusted" : "your day"}
+              Settings
             </button>
           </span>
-          <p>
-            From <strong>{current.name}</strong>, off the train by{" "}
-            <strong>{settings.arriveBy}</strong>, home within{" "}
-            <strong>{formatHours(budget.budgetHours)}</strong>
-            {budget.maxDays > 1 && ` over up to ${budget.maxDays} days`}.
-          </p>
+          {home ? (
+            <p>
+              From <strong>{home.name}</strong>, off the train by{" "}
+              <strong>{settings.arriveBy}</strong>, home within{" "}
+              <strong>{formatHours(settings.budgetHours)}</strong>
+              {settings.maxDays > 1 && ` over up to ${settings.maxDays} days`}. Looking{" "}
+              <strong>{radiusKm} km</strong> around the door.
+            </p>
+          ) : (
+            <p>
+              Pick the station you would catch the train at, and drop a pin where
+              the ride has to end. Everything else follows from those two.
+            </p>
+          )}
         </header>
 
-        <nav className="months" aria-label="Month">
-          {load.plan.months.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              className={m.key === month?.key ? "month is-active" : "month"}
-              onClick={() => setMonthKey(m.key)}
-            >
-              {m.label.split(" ")[0]}
-            </button>
-          ))}
-        </nav>
+        {months.length > 0 && (
+          <nav className="months" aria-label="Month">
+            {months.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                className={m.key === month?.key ? "month is-active" : "month"}
+                onClick={() => setMonthKey(m.key)}
+              >
+                {m.label.split(" ")[0]}
+              </button>
+            ))}
+          </nav>
+        )}
 
-        {homeOpen && (
+        {(homeOpen || !home) && (
           <HomePicker
             stations={stations}
             loading={stations === null && timetableError === null}
             error={timetableError}
-            home={current}
-            built={builtHome}
+            home={home}
             placing={placing}
-            onPick={(next) => {
-              setPicked(next);
-              setSelected(null);
-              setPlacing(false);
-            }}
+            onPick={pickHome}
             onPlace={setPlacing}
             onClose={() => {
               setHomeOpen(false);
@@ -546,59 +484,23 @@ export function App() {
           />
         )}
 
-        {offPlan && (
-          <div className="off-plan">
-            <p>
-              {live?.querying
-                ? "Asking the timetable…"
-                : `${shownDestinations.length} stations reachable by train${
-                    live && live.outOfRange > 0
-                      ? `, ${live.outOfRange} beyond any ride home`
-                      : ""
-                  }.`}
-            </p>
-            {routing === null ? (
-              <>
-                <p>
-                  Nothing is routed from here yet, so there are no distances or
-                  gradients. Finding them is one request to brouter.de per
-                  station, a second apart.
-                </p>
-                <button
-                  type="button"
-                  className="settings-reset"
-                  onClick={routeAll}
-                  disabled={live === null || live.querying || shownDestinations.length === 0}
-                >
-                  Route {shownDestinations.length} rides home
-                </button>
-              </>
-            ) : (
-              <p>
-                {routing.done < routing.total
-                  ? `Routing, nearest first — ${routing.done} of ${routing.total}.`
-                  : `Routed ${routing.total - routing.failed.length} of ${routing.total}.`}
-                {routing.failed.length > 0 &&
-                  ` No route home from ${routing.failed.slice(0, 3).join(", ")}${
-                    routing.failed.length > 3 ? ` and ${routing.failed.length - 3} more` : ""
-                  }.`}
-              </p>
-            )}
-          </div>
-        )}
-
         {settingsOpen && (
           <SettingsPanel
-            budget={budget}
-            built={built}
-            onChange={setBudget}
+            settings={settings}
+            radiusKm={radiusKm}
+            curves={curves}
+            styles={styles}
+            onChange={chooseSettings}
             onClose={() => setSettingsOpen(false)}
           />
         )}
 
-        {month && (
+        {home && month && (
           <p className="month-note">
-            {month.date} · {stationCount} stations on {corridors.length} lines
+            {querying
+              ? "Asking the timetable…"
+              : `${month.label} · ${stationCount} station${stationCount === 1 ? "" : "s"} within reach` +
+                (outOfRange > 0 ? `, ${outOfRange} outside the circle` : "")}
           </p>
         )}
 
@@ -618,9 +520,8 @@ export function App() {
                   <span className="corridor-name">{corridor.name}</span>
                   <span className="corridor-range">
                     {corridor.destinations.length} stations ·{" "}
-                    {Number.isFinite(corridor.shortestRideKm)
-                      ? `${Math.round(corridor.shortestRideKm)}–${Math.round(corridor.longestRideKm)} km back`
-                      : `${formatMinutes(corridor.quickestTrainMinutes)}–${formatMinutes(corridor.slowestTrainMinutes)} out`}
+                    {formatMinutes(corridor.quickestTrainMinutes)}–
+                    {formatMinutes(corridor.slowestTrainMinutes)} out
                   </span>
                 </button>
 
@@ -630,10 +531,7 @@ export function App() {
                       const ride = bestVariant(rides[destination.stationId]);
                       const isSelected = destination.stationId === selected;
                       return (
-                        <li
-                          key={destination.stationId}
-                          ref={isSelected ? selectedRow : null}
-                        >
+                        <li key={destination.stationId} ref={isSelected ? selectedRow : null}>
                           <button
                             type="button"
                             className={isSelected ? "result is-selected" : "result"}
@@ -650,12 +548,19 @@ export function App() {
                                 ` · ${destination.transfers} change${destination.transfers > 1 ? "s" : ""}` +
                                   ` (${destination.worstWaitMinutes} min)`}
                             </span>
-                            {ride && (
-                              <span className="result-ride">
+                            {ride ? (
+                              <span
+                                className={ride.feasible ? "result-ride" : "result-ride is-over"}
+                                title={ride.feasible ? undefined : "Longer than the day allows"}
+                              >
                                 🚲 {Math.round(ride.km)} km · +{ride.ascentMetres} m ·{" "}
                                 {formatHours(ride.hours)}
                                 {ride.days > 1 && ` · ${ride.days} days`}
                               </span>
+                            ) : (
+                              routing?.stationId === destination.stationId && (
+                                <span className="result-ride">🚲 finding the way home…</span>
+                              )
                             )}
                           </button>
                         </li>
@@ -666,45 +571,18 @@ export function App() {
               </li>
             );
           })}
-          {corridors.length === 0 && (
-            <li className="empty">Nothing reachable that you could ride back from in time.</li>
+          {home && !querying && corridors.length === 0 && (
+            <li className="empty">
+              No train gets you anywhere inside {radiusKm} km by {settings.arriveBy}. Try a
+              later arrival, another change, or a wider circle.
+            </li>
           )}
         </ul>
 
-        {outOfReach.length > 0 && (
-          <div className="misses">
-            <button
-              type="button"
-              className="misses-head"
-              onClick={() => setShowMisses((v) => !v)}
-              aria-expanded={showMisses}
-            >
-              {showMisses ? "▾" : "▸"} {outOfReach.length} just out of reach
-            </button>
-            {showMisses && (
-              <ul className="miss-list">
-                {outOfReach.map((miss) => (
-                  <li key={miss.stationId}>
-                    <span className="miss-name">{miss.name}</span>
-                    <span className="miss-figures">
-                      {Math.round(miss.km)} km · {formatHours(miss.hours)} riding +{" "}
-                      {formatHours(miss.trainHours)} train
-                    </span>
-                    <span className="miss-need">
-                      needs a {formatHoursCeil(miss.neededBudgetHours!)} day
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
         <footer className="colophon">
-          Feed {load.plan.feed.start} → {load.plan.feed.end}. Riding at{" "}
+          Feed {formatDate(loaded.feedStart)} → {formatDate(loaded.plannableEnd)}. Riding at{" "}
           {describeCurve(curves.paved)}.
-          {" "}Plan built {describeAge(load.plan.generatedAt)}
-          {load.plan.field ? " with a ride-time field." : ", no ride-time field."}
+          {plan ? " Routes already in the plan are shown without asking BRouter again." : ""}
         </footer>
       </aside>
 
@@ -720,21 +598,22 @@ export function App() {
           </button>
         )}
         <MapView
-          plan={load.plan}
-          home={current}
+          mapStyleUrl={plan?.settings.mapStyleUrl ?? null}
+          field={plan && showField ? plan.field : null}
+          fieldLevelsTo={settings.budgetHours}
+          noTrain={plan?.noTrain ?? []}
+          home={home}
           placing={placing}
-          reachKm={offPlan ? maxRideKm(0, budget, { curves }) : null}
+          reachKm={home ? radiusKm : null}
           onPlace={(at) => {
-            setPicked({ ...current, rideTo: at });
-            setPlacing(false);
+            if (home) pickHome({ ...home, rideTo: at });
           }}
-          destinations={corridors.flatMap((c) => c.destinations)}
+          destinations={destinations}
           selected={selected}
-          variant={activeVariant}
+          variant={active}
           frontierHours={
             showFrontier && chosen ? settings.budgetHours - chosen.travelMinutes / 60 : null
           }
-          showField={showField && load.plan.field !== null}
           showNoTrain={showNoTrain}
           profile={profile}
           hoverIndex={hoverIndex}
@@ -755,64 +634,68 @@ export function App() {
           </button>
 
           {keyOpen && (
-          <ul className="key">
-            <li>
-              <span className="swatch swatch-train" /> train out, through the stops it
-              calls at
-            </li>
-            <li>
-              <span className="swatch swatch-ride" /> ride home, shaded by gradient
-            </li>
-            <li>
-              <span className="swatch swatch-dot" /> station with a morning train
-            </li>
-            {load.plan.noTrain.length > 0 && (
+            <ul className="key">
               <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={showNoTrain}
-                    onChange={(e) => setShowNoTrain(e.target.checked)}
-                  />
-                  <span className="swatch swatch-hollow" /> station with no morning train (
-                  {load.plan.noTrain.length})
-                </label>
+                <span className="swatch swatch-train" /> train out, through the stops it
+                calls at
               </li>
-            )}
-            {load.plan.field && (
               <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={showField}
-                    onChange={(e) => setShowField(e.target.checked)}
-                  />
-                  <span className="swatch swatch-ring" /> hours of riding home, from
-                  anywhere
-                </label>
+                <span className="swatch swatch-ride" /> ride home, shaded by gradient
               </li>
-            )}
-            {load.plan.field && showField && (
               <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={showFrontier}
-                    onChange={(e) => setShowFrontier(e.target.checked)}
-                  />
-                  <span className="swatch swatch-dash" /> how far else you could have gone
-                </label>
+                <span className="swatch swatch-dot" /> station you could be at in time
               </li>
-            )}
-          </ul>
+              <li>
+                <span className="swatch swatch-dash" /> {radiusKm} km around the door — as far
+                as this is looking
+              </li>
+              {(plan?.noTrain.length ?? 0) > 0 && (
+                <li>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={showNoTrain}
+                      onChange={(e) => setShowNoTrain(e.target.checked)}
+                    />
+                    <span className="swatch swatch-hollow" /> station with no morning train (
+                    {plan!.noTrain.length})
+                  </label>
+                </li>
+              )}
+              {plan?.field && (
+                <li>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={showField}
+                      onChange={(e) => setShowField(e.target.checked)}
+                    />
+                    <span className="swatch swatch-ring" /> hours of riding home, from
+                    anywhere
+                  </label>
+                </li>
+              )}
+              {plan?.field && showField && (
+                <li>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={showFrontier}
+                      onChange={(e) => setShowFrontier(e.target.checked)}
+                    />
+                    <span className="swatch swatch-dash" /> how far else you could have gone
+                  </label>
+                </li>
+              )}
+            </ul>
           )}
 
-          {keyOpen && chosen && activeVariant && (
+          {keyOpen && chosen && active && (
             <p className="key-note">
               <strong>{chosen.name}</strong>: {formatHours(chosen.travelMinutes / 60)} on the
               train leaves {formatHours(settings.budgetHours - chosen.travelMinutes / 60)} for
-              riding. This way home is {formatHours(activeVariant.hours)}, so it fits with{" "}
-              {formatHours(Math.max(0, activeVariant.slackHours))} spare.
+              riding. This way home is {formatHours(active.hours)}, so it fits with{" "}
+              {formatHours(Math.max(0, active.slackHours))} spare.
             </p>
           )}
         </div>
@@ -821,9 +704,17 @@ export function App() {
           <TripDetail
             destination={chosen}
             variants={variants}
-            active={activeVariant}
+            active={active}
             profile={profile}
-            effort={{ curves }}
+            effort={effort}
+            gpxUrl={gpxUrl ?? (active?.gpx ? `./data/gpx/${active.gpx}` : null)}
+            gpxName={gpxName}
+            routing={routing?.stationId === chosen.stationId ? routing.styleId : null}
+            error={rideError}
+            remaining={remaining}
+            tooShort={judged?.tooShort ?? false}
+            minHours={settings.minHours}
+            onRouteMore={routeMore}
             onHoverProfile={setHoverIndex}
             onPickVariant={setVariantId}
             onClose={() => setSelected(null)}
@@ -832,4 +723,23 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readJson(key: string): unknown {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 20260914 → "2026-09-14", for the one place the feed's own dates are shown. */
+function formatDate(date: number): string {
+  const text = String(date);
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
 }

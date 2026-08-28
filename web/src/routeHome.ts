@@ -1,6 +1,9 @@
 import { parseTrack, type BikeTrack } from "../../src/bike/track.js";
 import { measureRide, type MeasureOptions, type RideVariant } from "../../src/bike/measure.js";
 import type { PlanRideVariant } from "../../src/build/buildPlan.js";
+import type { RouteStyle } from "./routeStyles.js";
+import { profileFromTrack } from "./rideProfile.js";
+import type { LoadedProfile } from "./grade.js";
 import type { Point } from "../../src/shared/geo.js";
 
 /**
@@ -8,9 +11,9 @@ import type { Point } from "../../src/shared/geo.js";
  *
  * The planner does this over a disk cache with a one-second courtesy throttle,
  * which is the right shape for a script routing a hundred stations in a batch.
- * A page needs the same courtesy and a different shape: one route at a time, in
- * the order you are most likely to want them, cancellable the moment you move
- * the home again.
+ * A page needs the same courtesy and a different shape: the ride you asked for,
+ * now, and nothing you did not ask for. Clicking a station is one request;
+ * asking for the other ways home is one more each.
  */
 export interface RouterOptions {
   baseUrl: string;
@@ -60,70 +63,60 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export interface Candidate {
-  stationId: string;
-  name: string;
-  at: Point;
+/** One way home from one station: what a click asks for. */
+export interface RideRequest {
+  /** The station you would be getting off at. */
+  from: Point;
+  /** Your door. */
+  rideTo: Point;
+  style: RouteStyle;
+  /** Hours already spent on the train, which come out of the day. */
   trainHours: number;
-  /** Straight-line km to the ride-to point, which decides the order. */
-  crowKm: number;
 }
 
-export interface Progress {
-  done: number;
-  total: number;
-  /** Stations that could not be routed at all, by name. */
-  failed: string[];
+export type RouteOptions = MeasureOptions & { baseUrl: string; throttleMs?: number };
+
+/** A ride and its chart, which are made from the same track and arrive together. */
+export interface RoutedRide {
+  variant: PlanRideVariant;
+  profile: LoadedProfile;
+  /** Kept so the ride can be exported without asking for it a second time. */
+  track: BikeTrack;
 }
 
 /**
- * Routes every candidate, nearest first, reporting each as it lands.
+ * Routes and measures one way home.
  *
- * Nearest first because the closest station is both the likeliest to be
- * feasible and the likeliest to be the one you are about to click: the order
- * that fills the map from the middle outwards is also the order that answers
- * the question you already have.
- *
- * One profile per station, not six. The planner asks for every variant of every
- * ride because it has all night; here the first route is a filter — it says
- * whether this station is a trip at all — and the other ways home are worth
- * fetching only for the station you actually pick.
+ * Deliberately the smallest unit the interface can ask for. Everything the app
+ * shows about a ride — its length, its climbing, its gradient mix, its hours,
+ * whether it fits the day — comes out of this one call, so the page can stay
+ * empty of guesses until you point at a station.
  */
-export async function routeNearestFirst(
-  candidates: Candidate[],
-  rideTo: Point,
-  spec: { id: string; label: string; profile: string },
-  options: MeasureOptions & { baseUrl: string; throttleMs?: number },
-  onRide: (stationId: string, variant: PlanRideVariant) => void,
-  onProgress: (progress: Progress) => void,
-  signal: AbortSignal,
-): Promise<void> {
-  const ordered = [...candidates].sort((a, b) => a.crowKm - b.crowKm);
-  const failed: string[] = [];
+export async function routeRide(
+  request: RideRequest,
+  options: RouteOptions,
+  signal?: AbortSignal,
+): Promise<RoutedRide> {
+  const track = await routeBike(
+    [request.from, request.rideTo],
+    {
+      baseUrl: options.baseUrl,
+      profile: request.style.profile,
+      alternative: 0,
+      ...(options.throttleMs !== undefined ? { throttleMs: options.throttleMs } : {}),
+    },
+    signal,
+  );
 
-  for (const [done, candidate] of ordered.entries()) {
-    if (signal.aborted) return;
-    onProgress({ done, total: ordered.length, failed: [...failed] });
-    try {
-      const track = await routeBike([candidate.at, rideTo], {
-        baseUrl: options.baseUrl,
-        profile: spec.profile,
-        alternative: 0,
-        ...(options.throttleMs !== undefined ? { throttleMs: options.throttleMs } : {}),
-      }, signal);
-
-      const measured = measureRide(track, [], spec, 0, {
-        ...options,
-        trainHours: candidate.trainHours,
-      });
-      onRide(candidate.stationId, asPlanVariant(measured));
-    } catch (error) {
-      // An abort is the home moving, not a failure: stop quietly.
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      failed.push(candidate.name);
-    }
-  }
-  onProgress({ done: ordered.length, total: ordered.length, failed });
+  const measured = measureRide(track, [], request.style, 0, {
+    ...options,
+    trainHours: request.trainHours,
+  });
+  return {
+    variant: asPlanVariant(measured, request.style),
+    profile: profileFromTrack(track, options.profileStepMetres),
+    track,
+  };
 }
 
 /**
@@ -131,10 +124,14 @@ export async function routeNearestFirst(
  *
  * `track` and `surfaces` are dropped: in the file they become a .gpx and a
  * profile written to disk, and there is nowhere to write them here. The
- * elevation chart stays empty for a ride routed in the browser rather than
- * showing one belonging to a different road.
+ * elevation chart is fed from the track this call returned instead, so it is
+ * always the road on screen rather than one belonging to a different door.
  */
-function asPlanVariant(measured: Omit<RideVariant, "id" | "rank">): PlanRideVariant {
+export function asPlanVariant(
+  measured: Omit<RideVariant, "id" | "rank">,
+  style: RouteStyle,
+): PlanRideVariant {
   const { track: _track, surfaces: _surfaces, ...rest } = measured;
-  return { ...rest, id: measured.profile, rank: 1, gpx: null, elevationFile: null };
+  return { ...rest, id: style.id, label: style.label, rank: 1, gpx: null, elevationFile: null };
 }
+

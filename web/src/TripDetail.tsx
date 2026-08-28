@@ -1,5 +1,6 @@
 import type { EffortModel } from "../../src/bike/effort.js";
 import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+import type { RouteStyle } from "./routeStyles.js";
 
 import { formatHours } from "./corridors.js";
 import { ElevationProfile } from "./ElevationProfile.js";
@@ -12,6 +13,19 @@ interface Props {
   profile: LoadedProfile | null;
   /** Passed through to the profile, which can plot against riding time. */
   effort: EffortModel;
+  /** Where the .gpx can be had: a blob for a ride routed here, a file for one from the plan. */
+  gpxUrl: string | null;
+  gpxName: string;
+  /** The style being fetched right now, or null when nothing is in flight. */
+  routing: string | null;
+  /** Why the last attempt failed, when it did. */
+  error: string | null;
+  /** Ways home not fetched yet, each one request away. */
+  remaining: RouteStyle[];
+  /** True when even the most direct way back is too short to be worth the fare. */
+  tooShort: boolean;
+  minHours: number;
+  onRouteMore: (style: RouteStyle) => void;
   onHoverProfile: (index: number | null) => void;
   onPickVariant: (id: string) => void;
   onClose: () => void;
@@ -44,6 +58,14 @@ export function TripDetail({
   active,
   profile,
   effort,
+  gpxUrl,
+  gpxName,
+  routing,
+  error,
+  remaining,
+  tooShort,
+  minHours,
+  onRouteMore,
   onHoverProfile,
   onPickVariant,
   onClose,
@@ -91,8 +113,15 @@ export function TripDetail({
       </ol>
 
       <h3>Ride home</h3>
+      {error && <p className="detail-error">{error}</p>}
       {variants.length === 0 ? (
-        <p className="detail-note">No cycling route was found for this station.</p>
+        <p className="detail-note">
+          {routing
+            ? "Asking BRouter for a way home…"
+            : error
+              ? "Nothing routed from here yet — try again below."
+              : "No cycling route home from here."}
+        </p>
       ) : (
         <>
           <div className="variants" role="tablist">
@@ -125,6 +154,13 @@ export function TripDetail({
             ))}
           </div>
 
+          {tooShort && (
+            <p className="detail-note">
+              The shortest way back is under {formatHours(minHours)} — near enough
+              to have simply ridden there.
+            </p>
+          )}
+
           {active && (
             <>
               <p className="detail-summary">
@@ -141,9 +177,9 @@ export function TripDetail({
                   onHover={onHoverProfile}
                 />
               )}
-              {active.gpx && (
+              {gpxUrl && (
                 <p className="detail-export">
-                  <a href={`./data/gpx/${active.gpx}`} download>
+                  <a href={gpxUrl} download={gpxName}>
                     ↓ Download GPX
                   </a>{" "}
                   <span>full resolution, with elevation</span>
@@ -180,6 +216,25 @@ export function TripDetail({
             </>
           )}
         </>
+      )}
+
+      {(remaining.length > 0 || routing) && (
+        <div className="more-ways">
+          {remaining.map((style) => (
+            <button
+              key={style.id}
+              type="button"
+              className="variant is-ghost"
+              disabled={routing !== null}
+              onClick={() => onRouteMore(style)}
+            >
+              <span className="variant-label">{style.label}</span>
+              <span className="variant-figures">
+                {routing === style.id ? "asking BRouter…" : "+1 request"}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </section>
   );

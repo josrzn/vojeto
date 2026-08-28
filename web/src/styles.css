@@ -199,6 +199,9 @@ code {
 .result-name { font-weight: 600; font-size: 0.92rem; }
 .result-train { font-size: 0.78rem; color: var(--ink-soft); }
 .result-ride { font-size: 0.78rem; color: var(--bike); }
+/* A ride that does not fit is still worth seeing — it is how you learn what a
+   longer day would buy — but it must not read as an option. */
+.result-ride.is-over { opacity: 0.6; text-decoration: line-through; }
 
 .variants {
   display: flex;
@@ -227,6 +230,22 @@ code {
 .variant.is-over .variant-figures { text-decoration: line-through; }
 .variant-label { font-size: 0.78rem; font-weight: 600; }
 .variant-figures { font-size: 0.72rem; color: var(--ink-soft); }
+
+/* Ways home nobody has asked for yet: outlined rather than filled, because
+   each one is a request to somebody else's server and should look like an
+   offer rather than a result. */
+.more-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0;
+}
+.variant.is-ghost {
+  border-style: dashed;
+  background: none;
+  color: var(--ink-soft);
+}
+.variant.is-ghost:disabled { opacity: 0.5; cursor: default; }
 
 .detail-export {
   margin: 0.5rem 0 0;
@@ -539,19 +558,8 @@ code {
 }
 
 .home-error { margin: 0.4rem 0 0; font-size: 0.72rem; color: var(--bike); }
-
-/* Said plainly rather than shaded into the layout: off the plan's own home
-   there are no routed rides, and everything ride-shaped on screen belongs to
-   somewhere else. */
-.off-plan {
-  margin: 0.5rem 0 0;
-  padding: 0.4rem 0.5rem;
-  border-left: 2px solid var(--bike);
-  background: #fdf0ef;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  color: var(--ink-soft);
-}
+/* Said where the thing that failed is: the route you just asked for. */
+.detail-error { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--bike); }
 
 /* Settings ---------------------------------------------------------------- */
 
@@ -595,6 +603,51 @@ code {
 .setting-label strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 .setting input[type="range"] { width: 100%; margin: 0.15rem 0 0; accent-color: var(--bike); }
 .setting-hint { display: block; font-size: 0.68rem; color: #93a1b0; }
+.setting input[type="time"] {
+  width: 100%;
+  margin: 0.15rem 0 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  padding: 0.2rem 0.35rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+/* A heading inside the panel, marking where preferences about the train stop
+   and preferences about the day begin. */
+.settings-group {
+  margin: 0.9rem 0 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #93a1b0;
+}
+.settings-group:first-of-type { margin-top: 0.3rem; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.2rem 0 0;
+}
+.chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 0.15rem 0.55rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.chip:hover { border-color: #b9c4d1; }
+.chip.is-active {
+  border-color: var(--bike);
+  background: #fdf0f2;
+  color: var(--ink);
+}
 
 .settings-note {
   margin: 0.6rem 0 0;

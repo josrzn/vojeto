@@ -1,45 +1,126 @@
-import type { Budget } from "../../src/bike/effort.js";
+import { describeCurve, type SpeedCurves } from "../../src/bike/speed.js";
+import type { RouteStyle } from "./routeStyles.js";
+import type { DayType, Settings } from "./settings.js";
 import { formatHours } from "./corridors.js";
 
 interface Props {
-  budget: Budget;
-  /** What the plan was built with, which is the ceiling on what can be shown. */
-  built: Budget;
-  onChange: (budget: Budget) => void;
+  settings: Settings;
+  /** The circle actually being drawn, which is the budget's when none is set. */
+  radiusKm: number;
+  /** How fast you ride, which is read from config rather than edited here. */
+  curves: SpeedCurves;
+  styles: RouteStyle[];
+  onChange: (settings: Settings) => void;
   onClose: () => void;
 }
 
+const DAY_TYPES: Array<{ id: DayType; label: string }> = [
+  { id: "saturday", label: "Saturday" },
+  { id: "sunday", label: "Sunday" },
+  { id: "weekday", label: "Weekday" },
+];
+
 /**
- * The budget, as something you can move rather than something you rebuild for.
+ * The things about you that do not change from one look at the map to the next.
  *
- * Everything here re-decides the map from data already loaded: how long a ride
- * takes does not depend on how much time you have, so changing the budget is
- * pure arithmetic over durations that are already known. No routing, no
- * timetable, no waiting.
+ * Deliberately not the same panel as start-and-finish. Which station you leave
+ * from and where you are riding back to is the question you are asking, and it
+ * changes every few seconds; when you want to be off a train, how long a day
+ * you want and how far it is worth looking are answers about you, and they hold
+ * across every question you ask afterwards.
  *
- * That is also the limit. A station beyond the budget the plan was built with
- * was never routed at all, so raising the budget past it cannot reveal anything
- * — it would only promise a longer list and not deliver one. The sliders stop
- * where the file stops, and say why.
+ * Changing the train half asks the timetable again, which is a few milliseconds
+ * in a worker. Changing the day half is pure arithmetic over rides already
+ * fetched. Neither re-routes anything: how long a road takes does not depend on
+ * how much time you have.
  */
-export function SettingsPanel({ budget, built, onChange, onClose }: Props) {
-  const set = (patch: Partial<Budget>) => onChange({ ...budget, ...patch });
+export function SettingsPanel({ settings, radiusKm, curves, styles, onChange, onClose }: Props) {
+  const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
 
   return (
-    <section className="settings" aria-label="Time budget">
+    <section className="settings" aria-label="Settings">
       <header className="settings-head">
-        <h3>Your day</h3>
+        <h3>Settings</h3>
         <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
           ×
         </button>
       </header>
 
+      <h4 className="settings-group">The train out</h4>
+
+      <label className="setting">
+        <span className="setting-label">
+          Off the train by
+          <strong>{settings.arriveBy}</strong>
+        </span>
+        <input
+          type="time"
+          value={settings.arriveBy}
+          onChange={(event) => set({ arriveBy: event.target.value })}
+        />
+        <span className="setting-hint">the latest arrival that still leaves a day</span>
+      </label>
+
+      <label className="setting">
+        <span className="setting-label">
+          And not before
+          <strong>{settings.arriveNoEarlierThan}</strong>
+        </span>
+        <input
+          type="time"
+          value={settings.arriveNoEarlierThan}
+          onChange={(event) => set({ arriveNoEarlierThan: event.target.value })}
+        />
+        <span className="setting-hint">so a 5 a.m. arrival is not offered as a day out</span>
+      </label>
+
+      <Slider
+        label="Changes"
+        hint="each one is a platform and a wait"
+        value={settings.maxTransfers}
+        min={0}
+        max={3}
+        step={1}
+        format={(v) => (v === 0 ? "direct only" : `up to ${v}`)}
+        onChange={(maxTransfers) => set({ maxTransfers })}
+      />
+
+      <Slider
+        label="Longest journey out"
+        hint="past this the train is the day"
+        value={settings.maxTravelMinutes}
+        min={30}
+        max={360}
+        step={15}
+        format={(v) => formatHours(v / 60)}
+        onChange={(maxTravelMinutes) => set({ maxTravelMinutes })}
+      />
+
+      <div className="setting">
+        <span className="setting-label">Which day</span>
+        <div className="chips" role="group">
+          {DAY_TYPES.map((day) => (
+            <button
+              key={day.id}
+              type="button"
+              className={day.id === settings.dayType ? "chip is-active" : "chip"}
+              onClick={() => set({ dayType: day.id })}
+            >
+              {day.label}
+            </button>
+          ))}
+        </div>
+        <span className="setting-hint">trains run differently at the weekend</span>
+      </div>
+
+      <h4 className="settings-group">Your day</h4>
+
       <Slider
         label="Whole outing"
         hint="train out and ride home together"
-        value={budget.budgetHours}
-        min={1}
-        max={built.budgetHours}
+        value={settings.budgetHours}
+        min={2}
+        max={16}
         step={0.5}
         format={formatHours}
         onChange={(budgetHours) => set({ budgetHours })}
@@ -48,9 +129,9 @@ export function SettingsPanel({ budget, built, onChange, onClose }: Props) {
       <Slider
         label="Shortest worth a ticket"
         hint="below this you could just have ridden there"
-        value={budget.minHours}
+        value={settings.minHours}
         min={0}
-        max={Math.max(1, built.budgetHours / 2)}
+        max={8}
         step={0.5}
         format={formatHours}
         onChange={(minHours) => set({ minHours })}
@@ -59,47 +140,71 @@ export function SettingsPanel({ budget, built, onChange, onClose }: Props) {
       <Slider
         label="Days"
         hint="more than one allows an overnight stop"
-        value={budget.maxDays}
+        value={settings.maxDays}
         min={1}
-        max={Math.max(1, built.maxDays)}
+        max={4}
         step={1}
         format={(v) => `${v}`}
         onChange={(maxDays) => set({ maxDays })}
       />
 
-      {budget.maxDays > 1 && (
+      {settings.maxDays > 1 && (
         <Slider
           label="Riding each later day"
           hint="after the first, which the train eats into"
-          value={budget.hoursPerDay}
+          value={settings.hoursPerDay}
           min={1}
-          max={Math.max(1, built.hoursPerDay)}
+          max={12}
           step={0.5}
           format={formatHours}
           onChange={(hoursPerDay) => set({ hoursPerDay })}
         />
       )}
 
-      <p className="settings-note">
-        Recomputed from the rides already loaded — nothing is re-routed. The
-        limits are what <code>npm run plan</code> built: stations further than a{" "}
-        {formatHours(built.budgetHours)} day was never routed, so asking for more
-        here could only show you a shorter list than the truth.
-      </p>
+      <h4 className="settings-group">The ride home</h4>
 
-      <button
-        type="button"
-        className="settings-reset"
-        onClick={() => onChange(built)}
-        disabled={
-          budget.budgetHours === built.budgetHours &&
-          budget.minHours === built.minHours &&
-          budget.maxDays === built.maxDays &&
-          budget.hoursPerDay === built.hoursPerDay
-        }
-      >
-        Back to the plan's own settings
-      </button>
+      <Slider
+        label="Look this far around home"
+        hint="a straight line, drawn before any road is looked at"
+        value={settings.radiusKm ?? radiusKm}
+        min={20}
+        max={300}
+        step={10}
+        format={(v) => `${v} km`}
+        onChange={(km) => set({ radiusKm: km })}
+      />
+      {settings.radiusKm !== null && (
+        <button type="button" className="settings-reset" onClick={() => set({ radiusKm: null })}>
+          Use what the day allows ({radiusKm} km)
+        </button>
+      )}
+
+      <div className="setting">
+        <span className="setting-label">Offered first</span>
+        <div className="chips" role="group">
+          {styles.map((style) => (
+            <button
+              key={style.id}
+              type="button"
+              className={style.id === settings.style ? "chip is-active" : "chip"}
+              onClick={() => set({ style: style.id })}
+            >
+              {style.label}
+            </button>
+          ))}
+        </div>
+        <span className="setting-hint">
+          the one way home fetched when you pick a station; the others are a
+          click away
+        </span>
+      </div>
+
+      <p className="settings-note">
+        Riding at {describeCurve(curves.paved)}. Speed against gradient and
+        surface is the one thing set in <code>config/home.json</code> rather than
+        here — it is a curve, not a number, and it is worth writing down once
+        properly.
+      </p>
     </section>
   );
 }
@@ -127,7 +232,7 @@ function Slider({ label, hint, value, min, max, step, format, onChange }: Slider
         min={min}
         max={max}
         step={step}
-        value={Math.min(value, max)}
+        value={Math.min(Math.max(value, min), max)}
         onChange={(event) => onChange(Number(event.target.value))}
       />
       <span className="setting-hint">{hint}</span>

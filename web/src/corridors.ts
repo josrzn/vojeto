@@ -10,10 +10,20 @@ export interface Corridor {
   slowestTrainMinutes: number;
 }
 
-/** The variant a station is best represented by: the quickest one that fits. */
+/**
+ * The variant a station is best represented by: the quickest one that fits.
+ *
+ * Quickest rather than first, because the ways home arrive in whatever order
+ * they were fetched — out of a plan, or one click at a time — and a station
+ * summarised by whichever route happened to land first would describe itself
+ * differently depending on what you had asked for. When none of them fits, the
+ * quickest is still the near miss worth showing.
+ */
 export function bestVariant(variants: PlanRideVariant[] | undefined): PlanRideVariant | null {
   if (!variants?.length) return null;
-  return variants.find((v) => v.feasible) ?? variants[0]!;
+  const quickest = (a: PlanRideVariant, b: PlanRideVariant) => (a.hours <= b.hours ? a : b);
+  const fitting = variants.filter((v) => v.feasible);
+  return (fitting.length ? fitting : variants).reduce(quickest);
 }
 
 /**

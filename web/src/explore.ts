@@ -1,8 +1,5 @@
-import type { Query } from "../../src/router/raptor.js";
 import { toDestination, type PlanDestination } from "../../src/build/destination.js";
-import { maxRideKm } from "../../src/bike/effort.js";
 import { haversine, type Point } from "../../src/shared/geo.js";
-import type { Budget, EffortModel } from "../../src/bike/effort.js";
 import type { Itinerary } from "../../src/shared/types.js";
 
 /** Where you are starting from and where the ride has to end. */
@@ -18,67 +15,37 @@ export interface Home {
 export interface Exploration {
   destinations: PlanDestination[];
   /**
-   * Stations the train reaches that no ride home could cover in the time left.
+   * Stations the train reaches that fall outside the circle.
    *
    * Counted rather than listed: they are excluded by a straight line, which is
-   * enough to rule a place out and not enough to say anything else about it.
+   * enough to leave a place off the map and not enough to say anything else
+   * about it.
    */
   outOfRange: number;
 }
 
 /**
- * The query the planner runs, from settings the interface holds.
+ * Itineraries as candidates, with the ones outside the circle dropped.
  *
- * One place, so that picking a station by hand asks exactly what `npm run plan`
- * asks. The alternative is two call sites that agree until someone changes a
- * default in one of them.
- */
-export function queryFor(home: Home, date: number, settings: TripSettings): Query {
-  return {
-    date,
-    origin: home.stationId,
-    earliestDeparture: settings.earliestDeparture,
-    arriveBy: settings.arriveBy,
-    arriveNoEarlierThan: settings.arriveNoEarlierThan,
-    maxTravelSeconds: settings.maxTravelSeconds,
-    maxTransfers: settings.maxTransfers,
-    minTransferSeconds: settings.minTransferSeconds,
-    maxTransferSeconds: settings.maxTransferSeconds,
-  };
-}
-
-export interface TripSettings {
-  earliestDeparture: number;
-  arriveBy: number;
-  arriveNoEarlierThan: number;
-  maxTravelSeconds: number;
-  maxTransfers: number;
-  minTransferSeconds: number;
-  maxTransferSeconds: number;
-}
-
-/**
- * Itineraries as destinations, with the ones no ride could reach dropped.
- *
- * The same straight-line bound the planner uses before it calls BRouter: a ride
- * is never shorter than the crow flight, so a station further away than the
- * hours left could cover at any speed cannot work, and no routing is needed to
- * know it. It admits places a real road will not reach — that is the trade —
- * but it never hides one that would have worked.
+ * The circle is the whole filter, and deliberately so: it is drawn before a
+ * single road has been looked at, so a straight line is all it can honestly
+ * be. A ride is never shorter than the crow flight, so nothing inside the
+ * budget is ever outside a circle the budget drew — it admits places a real
+ * road will not reach, which is the trade, and hides none that would have
+ * worked. What is inside is a candidate; whether it is a trip is a question
+ * for BRouter, asked one station at a time when you click one.
  */
 export function explore(
   itineraries: Itinerary[],
   rideTo: Point,
-  budget: Budget,
-  effort: EffortModel,
+  radiusKm: number,
 ): Exploration {
   const destinations: PlanDestination[] = [];
   let outOfRange = 0;
 
   for (const itinerary of itineraries) {
     if (!Number.isFinite(itinerary.lat) || !Number.isFinite(itinerary.lon)) continue;
-    const reach = maxRideKm(itinerary.duration / 3600, budget, effort);
-    if (haversine(rideTo, itinerary) / 1000 > reach) {
+    if (haversine(rideTo, itinerary) / 1000 > radiusKm) {
       outOfRange++;
       continue;
     }

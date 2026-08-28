@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { explore, quickestTrains, sameHome, searchStations, type Home } from "../web/src/explore.js";
-import { TOURING_CURVES } from "../src/bike/speed.js";
-import type { Budget } from "../src/bike/effort.js";
 import type { Itinerary } from "../src/shared/types.js";
 
-const budget: Budget = { budgetHours: 10, maxDays: 1, hoursPerDay: 6, minHours: 3 };
-const effort = { curves: TOURING_CURVES };
+const RADIUS_KM = 100;
 const ROANNE = { lat: 46.034389, lon: 4.079342 };
 
 const itinerary = (name: string, lat: number, lon: number, hours: number): Itinerary => ({
@@ -34,48 +31,57 @@ const itinerary = (name: string, lat: number, lon: number, hours: number): Itine
 });
 
 describe("explore", () => {
-  it("keeps a station the hours left could cover", () => {
-    // 40 km away with an hour on the train: nine hours of riding is ample.
+  it("keeps a station inside the circle", () => {
+    // Roughly 40 km north: well inside a hundred.
     const near = itinerary("Near", 46.3, 4.2, 1);
-    const { destinations, outOfRange } = explore([near], ROANNE, budget, effort);
+    const { destinations, outOfRange } = explore([near], ROANNE, RADIUS_KM);
     expect(destinations.map((d) => d.name)).toEqual(["Near"]);
     expect(outOfRange).toBe(0);
   });
 
-  it("drops one no ride could reach, without routing to find out", () => {
-    // Brittany, from Roanne. No road exists that a day could cover.
+  it("drops one outside it, without routing to find out", () => {
+    // Brittany, from Roanne. No circle a day could justify reaches it.
     const far = itinerary("Lorient", 47.748, -3.366, 3);
-    const { destinations, outOfRange } = explore([far], ROANNE, budget, effort);
+    const { destinations, outOfRange } = explore([far], ROANNE, RADIUS_KM);
     expect(destinations).toEqual([]);
     expect(outOfRange).toBe(1);
   });
 
-  it("shrinks the reach as the train journey lengthens", () => {
-    const at = { lat: 46.9, lon: 4.9 };
-    const quick = explore([itinerary("X", at.lat, at.lon, 1)], ROANNE, budget, effort);
-    const slow = explore([itinerary("X", at.lat, at.lon, 9)], ROANNE, budget, effort);
-    expect(quick.destinations).toHaveLength(1);
-    expect(slow.destinations).toHaveLength(0);
+  it("does not care how long the train took", () => {
+    // The circle is about distance from the door, and nothing else. What the
+    // journey out costs is decided later, against a ride that has been routed.
+    const at = { lat: 46.5, lon: 4.4 };
+    const quick = explore([itinerary("X", at.lat, at.lon, 1)], ROANNE, RADIUS_KM);
+    const slow = explore([itinerary("X", at.lat, at.lon, 9)], ROANNE, RADIUS_KM);
+    expect(quick.destinations.map((d) => d.stationId)).toEqual(["X"]);
+    expect(slow.destinations.map((d) => d.stationId)).toEqual(["X"]);
   });
 
-  it("never drops a station a ride could actually have reached", () => {
-    // The bound must be a superset: the straight line is never longer than the
-    // road, so anything inside the budget is inside the circle.
-    for (const km of [10, 50, 100, 140]) {
+  it("cuts exactly at the radius, in every direction", () => {
+    for (const km of [10, 50, 99, 101, 150]) {
       const north = { lat: ROANNE.lat + km / 111, lon: ROANNE.lon };
-      const { destinations } = explore([itinerary("N", north.lat, north.lon, 1)], ROANNE, budget, effort);
-      // Nine hours left at 16 km/h flat covers 144 km.
-      if (km <= 140) expect(destinations).toHaveLength(1);
+      const { destinations } = explore(
+        [itinerary("N", north.lat, north.lon, 1)],
+        ROANNE,
+        RADIUS_KM,
+      );
+      expect(destinations).toHaveLength(km <= 99 ? 1 : 0);
     }
+  });
+
+  it("widens as the radius does, and never the other way", () => {
+    const at = itinerary("X", 46.034389 + 1.2, 4.079342, 1);
+    expect(explore([at], ROANNE, 100).destinations).toHaveLength(0);
+    expect(explore([at], ROANNE, 200).destinations).toHaveLength(1);
   });
 
   it("skips an itinerary with no position rather than placing it at zero", () => {
     const nowhere = itinerary("Nowhere", Number.NaN, Number.NaN, 1);
-    expect(explore([nowhere], ROANNE, budget, effort).destinations).toEqual([]);
+    expect(explore([nowhere], ROANNE, RADIUS_KM).destinations).toEqual([]);
   });
 
   it("builds destinations the way the planner does", () => {
-    const [destination] = explore([itinerary("Near", 46.3, 4.2, 1)], ROANNE, budget, effort).destinations;
+    const [destination] = explore([itinerary("Near", 46.3, 4.2, 1)], ROANNE, RADIUS_KM).destinations;
     expect(destination!.travel).toBe("1h00");
     expect(destination!.departure).toBe("06:00");
     expect(destination!.corridor).toBe("a line");
@@ -90,8 +96,7 @@ describe("quickestTrains", () => {
     const { destinations } = explore(
       [itinerary("A", 46.3, 4.2, 2), itinerary("A", 46.3, 4.2, 1), itinerary("B", 46.4, 4.3, 3)],
       ROANNE,
-      budget,
-      effort,
+      RADIUS_KM,
     );
     expect(quickestTrains(destinations)).toEqual({ A: 1, B: 3 });
   });

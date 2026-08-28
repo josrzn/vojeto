@@ -8,9 +8,8 @@ interface Props {
   stations: Station[] | null;
   loading: boolean;
   error: string | null;
-  home: Home;
-  /** The home the plan was built for, which is the one with rides in it. */
-  built: Home;
+  /** The pair being asked about, or null until someone picks a station. */
+  home: Home | null;
   placing: boolean;
   onPick: (home: Home) => void;
   onPlace: (placing: boolean) => void;
@@ -18,23 +17,22 @@ interface Props {
 }
 
 /**
- * Choosing where you are starting from, and where the ride has to end.
+ * The two places the whole app is about.
  *
- * These are two different places and the difference matters: you catch the
- * train at the station and you stop riding at your door, which on a bad day is
- * a kilometre of towpath apart. The planner has always kept them separate; this
- * is that pair made editable.
+ * Where you catch the train and where the ride has to end are different places,
+ * and the difference matters: on a bad day it is a kilometre of towpath. This
+ * is the pair everything else is derived from, which is why it is not filed
+ * under settings — it is the question, not a preference about how to answer it.
  *
- * The station list is 2,497 long, so it is searched rather than scrolled. The
- * ride-to point has no list — it is a spot on a map, and the only sane way to
- * give one is to point at it.
+ * The station list is thousands long, so it is searched rather than scrolled.
+ * The finishing point has no list — it is a spot on a map, and the only sane
+ * way to give one is to point at it.
  */
 export function HomePicker({
   stations,
   loading,
   error,
   home,
-  built,
   placing,
   onPick,
   onPlace,
@@ -56,9 +54,11 @@ export function HomePicker({
     <section className="home-picker" aria-label="Where you start and finish">
       <header className="settings-head">
         <h3>Start and finish</h3>
-        <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
-          ×
-        </button>
+        {home && (
+          <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        )}
       </header>
 
       <label className="setting">
@@ -67,7 +67,9 @@ export function HomePicker({
           ref={box}
           type="search"
           className="home-search"
-          placeholder={loading ? "loading the timetable…" : home.name}
+          placeholder={
+            loading ? "loading the timetable…" : (home?.name ?? "type a station name")
+          }
           value={search}
           disabled={loading || !stations}
           onChange={(event) => setSearch(event.target.value)}
@@ -82,13 +84,17 @@ export function HomePicker({
             <li key={station.id}>
               <button
                 type="button"
-                className={station.id === home.stationId ? "home-match is-current" : "home-match"}
+                className={station.id === home?.stationId ? "home-match is-current" : "home-match"}
                 onClick={() => {
+                  const at = { lat: station.lat, lon: station.lon };
                   onPick({
-                    ...home,
                     stationId: station.id,
                     name: station.name,
-                    at: { lat: station.lat, lon: station.lon },
+                    at,
+                    // Until you say otherwise, the ride ends at the station you
+                    // leave from. That is a plain fact rather than a guess, and
+                    // moving the pin is the next thing this panel offers.
+                    rideTo: home?.rideTo ?? at,
                   });
                   setSearch("");
                 }}
@@ -104,12 +110,13 @@ export function HomePicker({
       <p className="home-rideto">
         <span className="setting-label">
           Ride home to
-          <strong>{describe(home.rideTo)}</strong>
+          <strong>{home ? describe(home.rideTo) : "—"}</strong>
         </span>
         <button
           type="button"
           className={placing ? "home-place is-armed" : "home-place"}
           onClick={() => onPlace(!placing)}
+          disabled={!home}
         >
           {placing ? "click the map…" : "move it"}
         </button>
@@ -117,15 +124,6 @@ export function HomePicker({
       <span className="setting-hint">
         Where the ride actually ends — your door, not the platform.
       </span>
-
-      <button
-        type="button"
-        className="settings-reset"
-        onClick={() => onPick(built)}
-        disabled={home.stationId === built.stationId && describe(home.rideTo) === describe(built.rideTo)}
-      >
-        Back to {built.name}
-      </button>
     </section>
   );
 }

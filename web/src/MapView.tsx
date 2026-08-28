@@ -5,15 +5,22 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
-import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+import type { PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
 import type { Home } from "./explore.js";
-import type { Point } from "../../src/shared/geo.js";
+import { haversine, type Point } from "../../src/shared/geo.js";
 
-import { contourFeatures } from "../../src/bike/contour.js";
+import { contourFeatures, type Grid } from "../../src/bike/contour.js";
 import { MAP_GRADE_COLORS, bandSeries, type LoadedProfile } from "./grade.js";
 
 interface Props {
-  plan: Plan;
+  /** The basemap a plan named, or null for the built-in one. */
+  mapStyleUrl: string | null;
+  /** The ride-time-home backdrop, when a plan sampled one and it is wanted. */
+  field: Grid | null;
+  /** Contours are drawn every two hours up to here. */
+  fieldLevelsTo: number;
+  /** Stations within riding range that no morning train reaches. */
+  noTrain: Array<{ name: string; lat: number; lon: number }>;
   destinations: PlanDestination[];
   selected: string | null;
   /** The way home currently being shown, or null when nothing is selected. */
@@ -23,14 +30,13 @@ interface Props {
    * the ride field that is that station's personal frontier.
    */
   frontierHours: number | null;
-  showField: boolean;
   showNoTrain: boolean;
   /** Elevation samples for the shown ride, once fetched. */
   profile: LoadedProfile | null;
   /** Sample the reader is hovering in the profile chart, echoed on the map. */
   hoverIndex: number | null;
-  /** Where you start and finish, which the picker can move. */
-  home: Home;
+  /** Where you start and finish, or null until someone says. */
+  home: Home | null;
   /** Waiting for a click to place the ride-to point. */
   placing: boolean;
   /**
@@ -57,7 +63,10 @@ const STAGES_SOURCE = "stages";
 const REACH_SOURCE = "reach";
 
 export function MapView({
-  plan,
+  mapStyleUrl,
+  field,
+  fieldLevelsTo,
+  noTrain,
   destinations,
   selected,
   home,
@@ -66,7 +75,6 @@ export function MapView({
   onPlace,
   variant,
   frontierHours,
-  showField,
   showNoTrain,
   profile,
   hoverIndex,
@@ -75,12 +83,12 @@ export function MapView({
   // Contours are derived in the browser rather than baked into plan.json, so
   // the frontier can follow the selection without another build.
   const fieldLines = useMemo(() => {
-    if (!plan.field) return null;
-    const top = Math.ceil(plan.settings.budgetHours);
+    if (!field) return null;
+    const top = Math.ceil(fieldLevelsTo);
     const levels: number[] = [];
     for (let hours = 2; hours <= top; hours += 2) levels.push(hours);
-    return contourFeatures(plan.field, levels);
-  }, [plan.field, plan.settings.budgetHours]);
+    return contourFeatures(field, levels);
+  }, [field, fieldLevelsTo]);
 
   const selectedLegs = useMemo(
     () => destinations.find((d) => d.stationId === selected)?.legs ?? null,
@@ -88,7 +96,7 @@ export function MapView({
   );
 
   const fieldBounds = useMemo((): [[number, number], [number, number]] | null => {
-    const grid = plan.field;
+    const grid = field;
     if (!grid) return null;
     const known = grid.values
       .map((value, i) => (value === null ? null : i))
@@ -100,12 +108,12 @@ export function MapView({
       [Math.min(...lons), Math.min(...lats)],
       [Math.max(...lons), Math.max(...lats)],
     ];
-  }, [plan.field]);
+  }, [field]);
 
   const frontierLines = useMemo(() => {
-    if (!plan.field || frontierHours === null || frontierHours <= 0) return null;
-    return contourFeatures(plan.field, [frontierHours])[0] ?? null;
-  }, [plan.field, frontierHours]);
+    if (!field || frontierHours === null || frontierHours <= 0) return null;
+    return contourFeatures(field, [frontierHours])[0] ?? null;
+  }, [field, frontierHours]);
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
@@ -126,6 +134,9 @@ export function MapView({
   onPlaceRef.current = onPlace;
   const placingRef = useRef(placing);
   placingRef.current = placing;
+  // Read when the map is built, which happens after the first render.
+  const homeRef = useRef(home);
+  homeRef.current = home;
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -133,14 +144,19 @@ export function MapView({
     let instance: MapLibreMap | null = null;
 
     void (async () => {
-      const style = await resolveStyle(plan.settings.mapStyleUrl);
+      const style = await resolveStyle(mapStyleUrl ?? DEFAULT_STYLE_URL);
       if (cancelled || !container.current) return;
 
       instance = new maplibregl.Map({
         container: container.current,
         style: style.spec,
-        center: [plan.home.rideTo.lon, plan.home.rideTo.lat],
-        zoom: 7,
+        // Centred on the door when there is one, and on the country when there
+        // is not: an empty map that opens somewhere in particular is a claim
+        // about where you live that the app has no business making.
+        center: homeRef.current
+          ? [homeRef.current.rideTo.lon, homeRef.current.rideTo.lat]
+          : [FRANCE.lon, FRANCE.lat],
+        zoom: homeRef.current ? 8 : 5,
         attributionControl: { compact: true },
       });
       map.current = instance;
@@ -418,10 +434,30 @@ export function MapView({
       instance?.remove();
       map.current = null;
     };
-    // fieldBounds is only read when the map is first built; it is derived from
-    // plan.field, which does not change while the page is open.
+    // Built once per basemap. Where it looks is not a reason to rebuild it:
+    // that is what the recentring effect below is for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan.settings.mapStyleUrl, plan.home.rideTo.lat, plan.home.rideTo.lon]);
+  }, [mapStyleUrl]);
+
+  /**
+   * Follows the door when it moves somewhere else, and not when it does not.
+   *
+   * Nudging a pin down the towpath should leave the view exactly where you put
+   * it; picking a station in another département should not leave you looking
+   * at the wrong half of the country. The line between the two is drawn at the
+   * line between the two is drawn well beyond any plausible nudge and well
+   * inside the next town along.
+   */
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready || !home) return;
+    const centre = instance.getCenter();
+    const away = haversine({ lat: centre.lat, lon: centre.lng }, home.rideTo) / 1000;
+    if (away < MOVED_KM) return;
+    instance.flyTo({ center: [home.rideTo.lon, home.rideTo.lat], zoom: 8, duration: 900 });
+    // Only the pair matters, not the object rebuilt each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, home?.stationId, home?.rideTo.lat, home?.rideTo.lon]);
 
   // Station markers for the current month.
   useEffect(() => {
@@ -434,18 +470,22 @@ export function MapView({
       source.setData({
         type: "FeatureCollection",
         features: [
-          point(home.rideTo.lon, home.rideTo.lat, {
-            stationId: "",
-            name: "Home",
-            isHome: true,
-            isSelected: false,
-          }),
-          point(home.at.lon, home.at.lat, {
-            stationId: home.stationId,
-            name: home.name,
-            isHome: false,
-            isSelected: false,
-          }),
+          ...(home
+            ? [
+                point(home.rideTo.lon, home.rideTo.lat, {
+                  stationId: "",
+                  name: "Home",
+                  isHome: true,
+                  isSelected: false,
+                }),
+                point(home.at.lon, home.at.lat, {
+                  stationId: home.stationId,
+                  name: home.name,
+                  isHome: false,
+                  isSelected: false,
+                }),
+              ]
+            : []),
           ...destinations.map((destination) =>
             point(destination.lon, destination.lat, {
               stationId: destination.stationId,
@@ -469,9 +509,9 @@ export function MapView({
     if (!source) return;
     source.setData({
       type: "FeatureCollection",
-      features: reachKm === null ? [] : [circle(home.rideTo, reachKm)],
+      features: reachKm === null || !home ? [] : [circle(home.rideTo, reachKm)],
     });
-  }, [ready, home.rideTo, reachKm]);
+  }, [ready, home, reachKm]);
 
   // The continuous ride-time-home backdrop.
   useEffect(() => {
@@ -483,7 +523,7 @@ export function MapView({
       source.setData({
         type: "FeatureCollection",
         features:
-          showField && fieldLines
+          fieldLines
             ? fieldLines.map((contour) => ({
                 type: "Feature" as const,
                 properties: { level: contour.level },
@@ -493,7 +533,7 @@ export function MapView({
       });
     };
     paint();
-  }, [ready, fieldLines, showField]);
+  }, [ready, fieldLines]);
 
   // The selected station's own frontier: how far out you could still ride home
   // from, once that station's train has been paid for.
@@ -506,7 +546,7 @@ export function MapView({
       source.setData({
         type: "FeatureCollection",
         features:
-          showField && frontierLines
+          frontierLines
             ? [
                 {
                   type: "Feature" as const,
@@ -521,7 +561,7 @@ export function MapView({
       });
     };
     paint();
-  }, [ready, frontierLines, showField]);
+  }, [ready, frontierLines]);
 
   // Stations the trains never reach in time.
   useEffect(() => {
@@ -532,12 +572,10 @@ export function MapView({
     source.setData({
       type: "FeatureCollection",
       features: showNoTrain
-        ? plan.noTrain.map((station) =>
-            point(station.lon, station.lat, { name: station.name }),
-          )
+        ? noTrain.map((station) => point(station.lon, station.lat, { name: station.name }))
         : [],
     });
-  }, [ready, plan.noTrain, showNoTrain]);
+  }, [ready, noTrain, showNoTrain]);
 
   // The journey out, drawn through the stops the train calls at.
   useEffect(() => {
@@ -665,6 +703,15 @@ export function MapView({
 
   return <div className="map" ref={container} />;
 }
+
+/** How far the door has to move before the map follows it, in km. */
+const MOVED_KM = 60;
+
+/** The middle of France, for a map with nothing on it yet. */
+const FRANCE = { lat: 46.6, lon: 2.5 };
+
+/** The basemap used when no plan names one. */
+const DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 
 /** A flat grey backdrop, so the app still works when the tile host is unreachable. */
 const OFFLINE_STYLE: StyleSpecification = {

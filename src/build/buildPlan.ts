@@ -53,6 +53,10 @@ export interface Plan {
   feed: { source: string; start: string; end: string };
   settings: {
     arriveBy: string;
+    /** The rest of the train query, so the browser can ask what the plan asked. */
+    arriveNoEarlierThan: string;
+    earliestDeparture: string;
+    maxTravelMinutes: number;
     budgetHours: number;
     minRideHours: number;
     maxDays: number;
@@ -72,6 +76,13 @@ export interface Plan {
      * past what is polite to ask of it should not need a code change.
      */
     brouterUrl: string;
+    /**
+     * The ways home worth offering, from config.
+     *
+     * Shipped because the browser routes on demand now and has to know what to
+     * ask BRouter for. Config stays the one place they are named.
+     */
+    variants: Array<{ id: string; label: string; profile: string }>;
   };
   months: Array<{ key: string; label: string; date: string; destinations: PlanDestination[] }>;
   /** Keyed by station id and shared across months: the ride home never changes. */
@@ -319,6 +330,9 @@ export async function buildPlan(
     },
     settings: {
       arriveBy: formatTime(config.trip.arriveBy),
+      arriveNoEarlierThan: formatTime(config.trip.arriveNoEarlierThan),
+      earliestDeparture: formatTime(config.trip.earliestDeparture),
+      maxTravelMinutes: Math.round(config.trip.maxTravelSeconds / 60),
       budgetHours: config.ride.budget.budgetHours,
       maxDays: config.ride.budget.maxDays,
       hoursPerDay: config.ride.budget.hoursPerDay,
@@ -330,6 +344,7 @@ export async function buildPlan(
       dayType: config.dayType,
       mapStyleUrl: config.map.styleUrl,
       brouterUrl: config.ride.brouterUrl,
+      variants: config.ride.variants.map((v) => ({ id: v.id, label: v.label, profile: v.profile })),
     },
     months,
     rides,

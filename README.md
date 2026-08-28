@@ -2,11 +2,14 @@
 
 Take the train out in the morning, ride the bike home.
 
-Given a home station, this works out every station you can reach by TER in time
-to be off the train by a set hour, for one sample date per month the SNCF feed
-covers, plans several cycling routes back from each, and keeps the ones whose
-**train out plus ride home fits the time you actually have**. The result is a
-static site: pick a month, open a line, click a station to compare ways home.
+Pick the station you would catch the train at and drop a pin where the ride has
+to end. The app draws a circle around the pin, shows every station a TER reaches
+in time to be off the train by a set hour, and — when you click one — asks
+BRouter for a way home and tells you whether **train out plus ride home fits the
+time you actually have**.
+
+Both places are yours to change at any moment; everything else follows from
+them. There is no home town written into the code.
 
 ![The planner](docs/screenshot.png)
 
@@ -17,21 +20,32 @@ plain background — with tiles you get a normal map underneath.</sub>
 
 ```sh
 npm install
-npm run ingest      # download the SNCF feed and check it against your config
-npm run plan        # build public/data/plan.json
+npm run ingest      # download the SNCF feed and pack it for the browser
 npm run dev         # http://localhost:5173
 ```
 
-`npm run plan` writes into `public/`, which `npm run dev` serves live. A built
-site only picks it up when it is rebuilt, so `npm run preview` rebuilds first.
-The footer shows when the plan you are looking at was generated: if that is
-older than your last run, you are looking at a stale page.
+That is the whole app. `ingest` writes `public/data/timetable.json` and
+`timetable.times.bin` — the feed as a compact index the browser reads in a
+worker — and the page does the rest: RAPTOR queries here, BRouter routes on
+demand, one request per station you actually point at.
 
-`ingest` is worth running on its own the first time: it prints which services the
-filter kept, which station your home resolved to, where the ride home ends, and
-which dates it will plan for. `plan` then does the real work — one BRouter
-request per station per variant, throttled to one a second and cached on disk,
-so the first run takes a few minutes and later ones are quick.
+`ingest` is worth reading the first time: it prints which services the filter
+kept, which station your home resolved to, where the ride home ends, and which
+dates it can plan for.
+
+```sh
+npm run plan        # optional: pre-route every station overnight
+```
+
+`plan` is a **warm cache**, not a step. It routes every ride home for the pair
+in `config/home.json`, writes `public/data/plan.json` with .gpx files and
+elevation profiles beside it, and the page then starts with those answers
+already filled in instead of asking BRouter as you click. Built for a different
+station or a different door, it is about different roads and is ignored. Delete
+it and nothing breaks.
+
+`npm run dev` serves `public/` live; a built site only picks up new data when it
+is rebuilt, so `npm run preview` rebuilds first.
 
 ## Configuration
 
@@ -74,110 +88,95 @@ A destination is kept only if `train out + ride home` fits `budgetHours`.
 BRouter's own estimate is shown alongside for comparison but is not used to
 decide anything.
 
-### Starting from somewhere else
+These are the numbers the app *starts* from. Everything under **Settings** in
+the interface overrides them and is remembered per browser, so config is where
+you write down what you mean rather than where you have to go to change your
+mind.
 
-**start** in the masthead opens a picker for the two places a trip needs: the
-station you catch the train at, and the point the ride has to finish at. They
-are different places, and the difference is a kilometre of towpath — the planner
-has always kept them apart, and this is that pair made editable.
+### The two places, and everything else
 
-The station list is 2,497 long, so it is searched rather than scrolled. Names
-that begin with what you typed come first, so "lyon" offers Lyon Part-Dieu
-before Bellegarde-sur-Valserine. The ride-to point has no list, because it is a
-spot on a map: arm **move it** and the next map click is your door. While armed
-a click on a station dot places the point rather than selecting the station,
-since that is usually exactly where someone aims.
+There are two kinds of thing to set, and the app keeps them apart on purpose.
 
-Changing either runs a RAPTOR query in the worker and redraws. The timetable is
-fetched the first time the picker is opened, not on page load: it is 860 KB and
-only wanted by someone who is about to move.
+**The pair you change constantly** — the station you leave from and the point
+the ride has to finish at — is the question you are asking. It lives in the
+masthead, behind the button that names your station. They are different places,
+and the difference is a kilometre of towpath. The station list is thousands
+long, so it is searched rather than scrolled: names that begin with what you
+typed come first, so "lyon" offers Lyon Part-Dieu before
+Bellegarde-sur-Valserine. The finishing point has no list, because it is a spot
+on a map: arm **move it** and the next map click is your door. While armed a
+click on a station dot places the point rather than selecting the station, since
+that is usually exactly where someone aims.
 
-**What you get away from the plan's own home is the train half only.** No ride
-has been routed from a station you just picked, so there are no distances, no
-gradients and no verdicts — and the panel says so rather than leaving the
-figures from somewhere else looking like they belong to where you are. Stations
-the train reaches but no ride could cover are counted, using the straight-line
-bound: a ride is never shorter than the crow flight, so the count is honest even
-though nothing was routed.
+**The answers about you** — when you want to be off a train, how many changes
+you will put up with, how long a day you want, how far it is worth looking, and
+which way home to offer first — live under **Settings**, and hold across every
+question you ask afterwards. Changing the train half re-runs a RAPTOR query in
+the worker, which is a few milliseconds. Changing the day half is arithmetic
+over rides already fetched. Neither re-routes anything.
 
-Going back to the plan's own home restores the full view exactly.
+The pair and the settings are both remembered. On the next visit the app opens
+on the last pair you asked about — not on a town somebody wrote into the source.
+Until you have picked one, the map is empty and says so.
+
+### The circle
+
+The map draws a ring around your door, and the stations offered are the ones
+inside it. It is a deliberately crude filter: it is drawn before a single road
+has been looked at, so a straight line is all it can honestly be. A ride is
+never shorter than the crow flight, so a circle drawn by the budget admits
+places a real road will not reach — that is the trade — and hides none that
+would have worked.
+
+By default the radius is as far as the day could carry you with no train at all.
+**Look this far around home** in the settings pins it to something smaller when
+you do not want to see that far today.
 
 ### Routing from the page
 
-Away from the plan's own home, **Route N rides home** asks BRouter directly —
-the browser has permission, `brouter.de` answers with
-`Access-Control-Allow-Origin: *`.
+Clicking a station asks BRouter for one way home — the browser has permission,
+`brouter.de` answers with `Access-Control-Allow-Origin: *`.
 
-**Nearest first**, by straight-line distance to your door. The closest station
-is both the likeliest to be feasible and the likeliest to be the one you are
-about to click, so the order that fills the map outwards from the middle is also
-the order that answers the question you already have.
+**One request, when you point at something.** Not a hundred on load, not six per
+station. The other ways home — quiet roads, gravel, direct — are offered as
+outlined buttons under the ride, one request each, and only for the station you
+actually picked. brouter.de is donated hardware and the interface is shaped
+around that rather than apologising for it afterwards.
 
-**One route per station, not six.** The planner asks for every profile and every
-alternative because it has all night. Here the first route is a *filter*: it
-says whether this station is a trip at all. The other ways home are worth
-fetching only for the station you actually pick.
+**Everything about a routed ride comes from the one response.** Its length, its
+climbing, its gradient mix, its surfaces, its hours, whether it fits the day, the
+elevation chart, and the .gpx — which is built in the page from the track it was
+routed with and handed over as a download. Nothing is left blank because a file
+was not written, and nothing on screen belongs to a road to a different door.
 
-**Started on a click, not on every change.** Each station is one request to
-donated hardware, a second apart. A home moved three times while someone makes
-up their mind should not cost three hundred of them. Moving the home again
-aborts whatever is in flight — those routes ended at a door that has moved.
-
-The ring on the map is the outer bound: how far the budget could put you if the
-train took no time at all. Nothing beyond it is reachable whatever train you
-catch, which is why the map stops offering stations there. Each station inside
-is still tested against its own train time, which is a smaller circle.
+**Moving the door aborts whatever is in flight** and clears the rides, because
+they all ended somewhere you have left.
 
 `ride.brouterUrl` travels in `plan.json`, so pointing the page at a self-hosted
-BRouter is a config change rather than a code change. That matters: the public
-instance is donated, and a hundred stations per visitor is not a polite thing to
-ask of it.
-
-**Two things a live-routed ride does not have.** No GPX and no elevation
-profile, because both are files the planner writes to disk and there is nowhere
-to write them from a page. The chart stays empty rather than showing the profile
-of a road to a different door — which it did, until a browser test caught it.
+BRouter is a config change rather than a code change. Without a plan the page
+uses the public instance.
 
 ### Moving the budget without rebuilding
 
-The trip panel's **your day** control changes `budgetHours`, `minHours`,
-`maxDays` and `hoursPerDay` live, and the map re-decides itself. Nothing is
-re-routed, because nothing needs to be: how long a ride takes depends on the
-road and your legs, not on how much time you have. Every verdict in the plan is
-arithmetic over durations that are already in the file.
+The day half of **Settings** — `budgetHours`, `minHours`, `maxDays`,
+`hoursPerDay` — changes what fits, live, and the map re-decides itself. Nothing
+is re-routed, because nothing needs to be: how long a ride takes depends on the
+road and your legs, not on how much time you have.
 
-Two things keep it honest.
+The invariant that keeps it honest: **judging a ride at the settings it was
+measured with reproduces that verdict exactly.** Not approximately. If it did
+not, the sliders would be quietly showing a different app than the one that
+measured the ride, and you would only notice as numbers that move when nothing
+was touched.
 
-**Re-deciding at the plan's own settings reproduces the plan exactly.** Not
-approximately — the same verdicts, the same stations, the same order. If it
-did not, the sliders would be quietly showing a different app than the one that
-wrote the file, and you would only notice as numbers that move when nothing was
-touched. The plan therefore ships `trainHours`: the journey each station was
-actually judged by, which is its quickest train across every month rather than
-whichever month is on screen.
+A ride that does not fit is not hidden. It is struck through in the list and
+shown in the panel with what it overruns by, so you can see what a longer day
+would buy you rather than guessing at it.
 
-**The sliders only narrow.** A station beyond the budget `npm run plan` was run
-with was never routed at all, so raising the budget past it could not reveal it
-— it would promise a longer list and hand you a shorter one. The controls stop
-where the file stops and say why, and a remembered setting is clamped to
-whatever plan it is later applied to.
-
-`minHours` drops the other end: somewhere you could simply have ridden to is not
+`minHours` is the other end: somewhere you could simply have ridden to is not
 worth a train ticket. It is judged against the **most direct** way home, since
 that is how far the place really is — taking a longer route back does not turn a
 short hop into an outing.
-
-Stations that the train reaches but the ride overruns are not silently dropped.
-They are listed, with the budget each would need:
-
-```
-Just out of reach on a 8 h budget:
-  Rive-de-Gier      70 km, 5.9 h riding + 2.2 h train = needs 8.1 h
-  Vienne            84 km, 7.2 h riding + 2.3 h train = needs 9.5 h
-```
-
-so you can pick `budgetHours` from what it would actually buy you rather than
-guessing. The same list appears in the app under "just out of reach".
 
 For an overnight trip, raise `maxDays`. Day one gets whatever is left of
 `budgetHours` after the train; each later day gets `hoursPerDay`. The ride is
@@ -294,10 +293,15 @@ BRouter, for the same reason.
 ]
 ```
 
-Each profile is requested `alternatives` times, using BRouter's
+`npm run plan` requests each profile `alternatives` times, using BRouter's
 `alternativeidx`, giving up to `profiles x alternatives` ways home per station.
 Identical results are dropped, and each is checked against the budget
 separately — a gravel route can be too slow for a day when the direct one fits.
+
+The app itself asks for one profile at a time: the one under **Offered first**
+when you click a station, and the others only when you ask for them by name.
+Same list, same labels; the difference is that a script has all night and a page
+has somebody waiting.
 
 **The list is ordered quickest first**, not grouped by profile, and routes that
 overrun the budget sort to the end. Within a profile the routes are numbered the
@@ -368,8 +372,13 @@ hop between, say, Lyon Part-Dieu and Lyon Perrache.
 
 ### Moving house
 
-Change `home.station.query` and `home.rideTo`, re-run `npm run plan`. Nothing
-else is home-specific.
+Type the new station into the picker and drop the pin. That is the whole of it —
+the app is built around the pair being yours to change, and the last one you
+used is what it opens on next time.
+
+`config/home.json` is worth updating too if you want `npm run plan` to pre-route
+the new place, and it is where a fresh browser gets its first suggestion from.
+Nothing else in the project is home-specific.
 
 ## What the numbers mean, and what they don't
 
@@ -618,9 +627,10 @@ Profiles are written to `public/data/profiles/`, one small file per ride
 
 ## Taking a route with you
 
-Every routed ride gets a GPX in `public/data/gpx/`, linked from the trip panel —
-including rides that overrun the budget, since the route exists and you may want
-it for a longer day.
+Every ride gets a GPX, linked from the trip panel — including rides that overrun
+the budget, since the route exists and you may want it for a longer day. A ride
+routed in the page builds it there, from the track it was just routed with; one
+that came out of `npm run plan` is a file in `public/data/gpx/`.
 
 These come from the router's **untouched** track: every point it returned, with
 elevation. The line on the map is a different thing, simplified and stripped of
@@ -705,8 +715,8 @@ every calendar, every derived lookup — and answers a RAPTOR query identically.
 ## Commands
 
 ```sh
-npm run ingest                 # download + validate
-npm run plan                   # build the plan
+npm run ingest                 # download, validate, pack for the browser
+npm run plan                   # optional: pre-route every ride home
 npm run stations -- Lyon       # search station names
 npm test                       # unit tests
 npm run build                  # typecheck + build the static site into dist/
@@ -732,10 +742,12 @@ Useful flags (after `--`):
 | `src/router/raptor.ts` | RAPTOR. Run once per morning departure from home, keeping the best journey per station that lands inside the arrival window. |
 | `src/bike/` | BRouter client (disk-cached), the effort model that turns distance and climb into hours, the ride planner (variants, day splits, bail-out stations), and the ride-time field with its marching-squares contours. |
 | `src/build/` | Pick a date per month, run both halves, keep what fits the budget, emit `public/data/plan.json`. |
-| `web/` | React + MapLibre front end. Reads only `plan.json`, so the built site is fully static. |
+| `web/` | React + MapLibre front end. Reads the packed timetable, runs RAPTOR in a worker, and calls BRouter on demand. |
 
-The generated `plan.json` is the entire contract between the two halves — the
-web app never talks to SNCF or BRouter, so `dist/` can be hosted anywhere.
+`timetable.json` plus `timetable.times.bin` is the contract between the two
+halves: the site is static, and everything it does afterwards it does in the
+browser. `plan.json`, when present, is a cache of rides already routed for one
+pair of places.
 
 ### Working offline
 

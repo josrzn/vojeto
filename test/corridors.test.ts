@@ -49,13 +49,19 @@ const variant = (km: number, feasible = true, id = "trekking"): PlanRideVariant 
 });
 
 describe("bestVariant", () => {
-  it("prefers the first variant that fits", () => {
+  it("prefers a variant that fits over one that does not", () => {
     const variants = [variant(90, false, "a"), variant(60, true, "b")];
     expect(bestVariant(variants)?.id).toBe("b");
   });
 
-  it("falls back to the first when none fit, so the near miss is still visible", () => {
-    expect(bestVariant([variant(90, false, "a"), variant(95, false, "b")])?.id).toBe("a");
+  it("prefers the quickest of the ones that fit, whatever order they came in", () => {
+    const variants = [variant(80, true, "long"), variant(50, true, "short")];
+    expect(bestVariant(variants)?.id).toBe("short");
+    expect(bestVariant([...variants].reverse())?.id).toBe("short");
+  });
+
+  it("falls back to the quickest when none fit, so the near miss is still visible", () => {
+    expect(bestVariant([variant(95, false, "a"), variant(90, false, "b")])?.id).toBe("b");
   });
 
   it("handles a station with no routes", () => {
