@@ -3,8 +3,8 @@
 Take the train out in the morning, ride the bike home.
 
 Pick the station you would catch the train at and drop a pin where the ride has
-to end. The app draws a circle around the pin, shows every station a TER reaches
-in time to be off the train by a set hour, and — when you click one — asks
+to end. The app draws a circle around the pin, shows every station a regional
+train reaches in time to be off the train by a set hour, and — when you click one — asks
 BRouter for a way home and tells you whether **train out plus ride home fits the
 time you actually have**.
 
@@ -397,16 +397,19 @@ So "vary the month" means the next three or four months, not next July. Re-run
 `plan` monthly and the horizon rolls forward.
 
 **One sample date per month.** The plan uses the second Saturday of each month
-(or whatever `dayType` says). TER timetables shift a little through the year and
+(or whatever `dayType` says). Regional timetables shift a little through the year and
 a lot on public holidays, so treat a listed train as "this service normally
 runs", not as a booking.
 
-**Bikes on trains are not in the data.** GTFS says nothing about bike spaces.
-The filter keeps `OCETrain TER`, where a non-folded bike normally travels free
-and unreserved subject to space — but that is a rule of thumb, not a guarantee.
-TGV, Intercités and OUIGO are excluded because all three require a paid bike
-reservation, and replacement coaches because they will not take a bike at all.
-Check before you rely on a specific train.
+**Bikes on trains are barely in the data.** GTFS has a `bikes_allowed` field and
+this feed leaves it empty, so what is offered rests on a rule of thumb: on a
+regional train a non-folded bike normally travels free and unreserved, subject
+to space. That is a rule of thumb and not a guarantee, and it is why the filter
+is a deny list you can see rather than a rule you cannot. TGV and OUIGO are left
+out because both want a paid bike reservation, night trains because the space is
+limited and reserved, and replacement coaches because they will not take a bike
+at all. Intercités are offered, and many of them do want a reservation. Check
+before you rely on a specific train.
 
 **The ride home is a suggestion.** BRouter knows the road network, not seasonal
 closures, surface condition after rain, or what you find pleasant. Distance comes
@@ -428,59 +431,112 @@ stations by the line of your final leg for exactly this reason: a corridor
 collapses to one row showing the range of rides it offers, and opens into the
 stations along it, ordered by ride length. Four lines beat 110 flat rows.
 
-## How TER is separated from everything else
+## Which trains, and how they are told apart
 
 This is the least obvious part of the feed, and worth understanding before you
 change any of it.
 
 `routes.txt` carries **no usable service type**. Every rail route is
 `route_type` 2, the agency is `SNCF VOYAGEURS` for almost all of them, and the
-names look like `C30` / `Saint-Étienne - Roanne`. The string "TER" does not
-appear anywhere. Filtering on names cannot work.
+names look like `C30` / `Saint-Étienne - Roanne`. Filtering on names cannot
+work.
 
 What does work is the **stop point id**, which encodes the service:
 
 ```
 StopArea:OCE87726802                the station "Roanne"
-  StopPoint:OCETrain TER-87726802     TER trains call here
-  StopPoint:OCECar TER-87726802       TER replacement coaches call here
+  StopPoint:OCETrain TER-87726802     regional trains call here
+  StopPoint:OCECar TER-87726802       replacement coaches call here
   StopPoint:OCEINTERCITES-87726802    Intercités call here
 ```
 
 Every trip calls exclusively at stop points of a single kind — this holds for
 all 43,517 trips in the feed — so filtering stops by kind also selects trips.
-`gtfs.keepStopKinds` is that filter, and it defaults to `["OCETrain TER"]`.
 
-That `OCECar TER` line matters: those are **buses replacing trains**, about
-5,000 trips. They carry the TER brand, they would pass any name-based filter,
-and they will not take your bike.
+### Why it is a deny list
 
-### When the numbers look wrong
+The filter is written as **what to leave out**, not what to keep, and that is
+the important decision here.
+
+Regional trains are branded by region. It is TER over most of the country, but
+**BreizhGo** in Brittany, **Nomad** in Normandy, and **liO**, **Rémi**,
+**ZOU!**, **Mobigo**, **Aléop**, **Fluo** elsewhere. Keeping only the kinds you
+happened to name loses whole regions *silently*: the trains are in the feed, the
+map is simply emptier than the country is, and nothing anywhere says so. Naming
+what you are avoiding fails the opposite way — an unfamiliar brand is kept, and
+turns up as trains you can look at and reject.
+
+```json
+"dropStopKindPatterns": [
+  "TGV", "OUIGO", "EUROSTAR", "THALYS", "LYRIA",
+  "de nuit", "^OCECar", "^OCEBus", "NAVETTE"
+]
+```
+
+Patterns, matched case-insensitively against the kind. What they leave out is
+long-distance rail — where a bike needs a bag, a reservation, or both — and road
+replacements, where it needs a miracle. That `OCECar TER` line matters: those
+are **buses replacing trains**, about 5,000 trips, they carry the TER brand,
+they would pass any name-based filter, and they will not take your bike.
+
+Intercités are *kept* under this default, where the old TER-only filter dropped
+them. Many of them take a bike, and the ones that do not are better seen and
+rejected than never offered.
+
+`gtfs.keepStopKinds` is still there as an exact allow list, and overrides the
+deny list entirely when you set it. Use it when you know precisely what your
+feed contains.
+
+**GTFS has a field for exactly this question** — `bikes_allowed` in `trips.txt`,
+where 1 means a bike fits and 2 means it does not. `ingest` reports how many
+trips declare it. The SNCF feed leaves it empty at the time of writing, which is
+why any of the above is necessary; if that changes, it beats guessing from a
+service's name and this filter becomes a fallback.
+
+### When somewhere looks emptier than it should
+
+Every `ingest` prints the kinds the feed contains and what the filter did with
+each:
+
+```
+Stop kinds in stops.txt:
+         6  (station)
+  +      3  OCETrain TER
+  -      2  OCECar TER
+  +      2  OCEINTERCITES
+  -      2  OCETGV INOUI
+  keeping everything except: TGV, OUIGO, EUROSTAR, THALYS, LYRIA, ...
+  note: OUIGO, THALYS matched nothing in this feed — either it carries no such
+  service, or the name has changed.
+```
+
+That last note is worth reading. A drop pattern that matches nothing is either a
+service this feed does not carry, or a name that has changed under you — and the
+second one quietly widens what you are planning with.
+
+For one place in particular:
+
+```sh
+npm run stations -- Lorient
+```
+
+reads the feed **unfiltered** and prints, per station, every kind that calls
+there with the lines it carries and a `+`/`-` for what your config does with it.
+That is the difference between "no train reaches here in your window" and "the
+trains that do are a kind you are leaving out", which is otherwise impossible to
+tell apart from the outside.
 
 ```sh
 npm run ingest -- --explain-routes
 ```
 
-It lists every stop kind with a count, reports how many routes were read, breaks
-them down by `route_type` with a rail/not-rail verdict, and lists the kept and
-dropped labels. **If the filter leaves nothing, `ingest` prints that report
-automatically** — you never need a second run to find out why.
+adds the route-level report: how many routes were read, broken down by
+`route_type` with a rail/not-rail verdict, and the kept and dropped labels. **If
+the filter leaves nothing, `ingest` prints that automatically** — you never need
+a second run to find out why.
 
 `gtfs.keepRoutePatterns` / `gtfs.dropRoutePatterns` remain as an escape hatch,
 but default to empty, because in this feed they have nothing useful to match on.
-
-Two ways to fix a mismatch:
-
-- **By name** — `gtfs.keepRoutePatterns` and `gtfs.dropRoutePatterns` are
-  case-insensitive regular expressions, matched against
-  `agency | short name | long name | description` (exactly the labels the
-  report lists). An empty `keepRoutePatterns` means "keep every rail route".
-- **By type** — set `gtfs.keepRouteTypes` to the `route_type` values you want,
-  taken from the report's breakdown. This bypasses name matching entirely, and
-  is the more stable option if the labels turn out to be inconsistent.
-
-Note that rail covers both `route_type` 2 and the extended range 100–117
-(102 is long distance, 106 regional), because feeds use both.
 
 ## The map of what is possible
 
@@ -717,7 +773,7 @@ every calendar, every derived lookup — and answers a RAPTOR query identically.
 ```sh
 npm run ingest                 # download, validate, pack for the browser
 npm run plan                   # optional: pre-route every ride home
-npm run stations -- Lyon       # search station names
+npm run stations -- Lyon       # what calls at a station, unfiltered
 npm test                       # unit tests
 npm run build                  # typecheck + build the static site into dist/
 ```

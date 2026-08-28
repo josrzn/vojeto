@@ -44,7 +44,10 @@ export interface Config {
     keepRoutePatterns: RegExp[];
     dropRoutePatterns: RegExp[];
     keepRouteTypes: number[] | undefined;
+    /** Exact stop kinds to keep. Empty means "everything the drop patterns leave". */
     keepStopKinds: string[];
+    /** A stop kind matching any of these is left out of the index. */
+    dropStopKindPatterns: RegExp[];
   };
   map: { styleUrl: string };
   dayType: "saturday" | "sunday" | "weekday";
@@ -66,6 +69,7 @@ interface RawConfig {
     dropRoutePatterns?: string[];
     keepRouteTypes?: number[];
     keepStopKinds?: string[];
+    dropStopKindPatterns?: string[];
   };
   map?: { styleUrl?: string };
   dayType?: string;
@@ -156,12 +160,41 @@ export async function loadConfig(file = "config/home.json"): Promise<Config> {
       keepRoutePatterns: (gtfs.keepRoutePatterns ?? []).map((p) => new RegExp(p, "i")),
       dropRoutePatterns: (gtfs.dropRoutePatterns ?? []).map((p) => new RegExp(p, "i")),
       keepRouteTypes: gtfs.keepRouteTypes?.map(Number),
-      keepStopKinds: gtfs.keepStopKinds ?? ["OCETrain TER"],
+      keepStopKinds: gtfs.keepStopKinds ?? [],
+      dropStopKindPatterns: (gtfs.dropStopKindPatterns ?? DEFAULT_DROP_STOP_KINDS).map(
+        (p) => new RegExp(p, "i"),
+      ),
     },
     map: { styleUrl: String(raw.map?.styleUrl ?? "https://tiles.openfreemap.org/styles/liberty") },
     dayType: dayType as Config["dayType"],
   };
 }
+
+/**
+ * The services a bike is not getting on, by the names this feed uses.
+ *
+ * Said as what to leave out rather than what to keep, because regional trains
+ * are branded by region — TER, but also BreizhGo, Nomad, liO, Rémi, ZOU!,
+ * Mobigo, Aléop — and an allow list quietly loses whichever region you forgot.
+ * What is left out here is long-distance rail, where a bike needs a bag or a
+ * reservation, and road replacements, where it needs a miracle.
+ *
+ * These are patterns, matched case-insensitively against the kind, so they
+ * survive the small renamings brands go in for. `npm run ingest` prints every
+ * kind in the feed with its verdict, and warns about a pattern that matched
+ * nothing.
+ */
+export const DEFAULT_DROP_STOP_KINDS = [
+  "TGV",
+  "OUIGO",
+  "EUROSTAR",
+  "THALYS",
+  "LYRIA",
+  "de nuit",
+  "^OCECar",
+  "^OCEBus",
+  "NAVETTE",
+];
 
 function num(value: unknown, fallback: number): number {
   const parsed = Number(value);

@@ -1,7 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { keepStop, stopKind, summariseKinds } from "../src/gtfs/serviceKind.js";
+import {
+  NO_KIND_FILTER,
+  keepStop,
+  stopKind,
+  summariseKinds,
+  unusedDropPatterns,
+  type KindFilter,
+} from "../src/gtfs/serviceKind.js";
+import { DEFAULT_DROP_STOP_KINDS } from "../src/config.js";
 import { countServicesPerDate, plannableEnd } from "../src/gtfs/coverage.js";
 import { loadTimetable } from "../src/gtfs/load.js";
 import { reachableStations } from "../src/router/raptor.js";
@@ -29,21 +37,67 @@ describe("stopKind", () => {
   });
 });
 
-describe("keepStop", () => {
-  const keep = new Set(["OCETrain TER"]);
+const asFilter = (drop: string[], keep: string[] = []): KindFilter => ({
+  keep: new Set(keep),
+  drop: drop.map((p) => new RegExp(p, "i")),
+});
 
-  it("keeps the wanted kind and rejects the others", () => {
-    expect(keepStop("StopPoint:OCETrain TER-87726802", keep)).toBe(true);
-    expect(keepStop("StopPoint:OCECar TER-87726802", keep)).toBe(false);
-    expect(keepStop("StopPoint:OCETGV INOUI-87726802", keep)).toBe(false);
+const DEFAULTS = asFilter(DEFAULT_DROP_STOP_KINDS);
+
+describe("keepStop", () => {
+  it("keeps what the drop patterns do not name", () => {
+    expect(keepStop("StopPoint:OCETrain TER-87726802", DEFAULTS)).toBe(true);
+    expect(keepStop("StopPoint:OCEINTERCITES-87726802", DEFAULTS)).toBe(true);
   });
 
-  it("keeps everything when no kinds are configured", () => {
-    expect(keepStop("StopPoint:OCETGV INOUI-87726802", new Set())).toBe(true);
+  it("leaves out long-distance rail and road replacements", () => {
+    expect(keepStop("StopPoint:OCETGV INOUI-87726802", DEFAULTS)).toBe(false);
+    expect(keepStop("StopPoint:OCEOUIGO-87726802", DEFAULTS)).toBe(false);
+    expect(keepStop("StopPoint:OCEINTERCITES de nuit-87726802", DEFAULTS)).toBe(false);
+    expect(keepStop("StopPoint:OCECar TER-87726802", DEFAULTS)).toBe(false);
+  });
+
+  /**
+   * The reason this is a deny list at all. Regional trains are branded by
+   * region, and an allow list naming "OCETrain TER" loses Brittany without
+   * saying so — the trains are in the feed, the map is simply emptier than the
+   * country is. Kept means visible; a service that should not be there can be
+   * dropped once you have seen it.
+   */
+  it("keeps a regional brand nobody wrote down", () => {
+    for (const brand of ["OCEBreizhGo", "OCENomad", "OCEliO", "OCERémi", "OCEZOU", "OCEMobigo"]) {
+      expect(keepStop(`StopPoint:${brand}-87726802`, DEFAULTS)).toBe(true);
+    }
+  });
+
+  it("matches a kind however it is cased", () => {
+    expect(keepStop("StopPoint:OCEtgv inoui-1", DEFAULTS)).toBe(false);
+  });
+
+  it("takes an exact allow list as the last word, when one is given", () => {
+    const filter = asFilter(DEFAULT_DROP_STOP_KINDS, ["OCETGV INOUI"]);
+    expect(keepStop("StopPoint:OCETGV INOUI-1", filter)).toBe(true);
+    expect(keepStop("StopPoint:OCETrain TER-1", filter)).toBe(false);
+  });
+
+  it("keeps everything when nothing is configured", () => {
+    expect(keepStop("StopPoint:OCETGV INOUI-87726802", NO_KIND_FILTER)).toBe(true);
   });
 
   it("keeps ids that carry no kind, since they cannot be judged", () => {
-    expect(keepStop("SP_ROANNE", keep)).toBe(true);
+    expect(keepStop("SP_ROANNE", DEFAULTS)).toBe(true);
+  });
+});
+
+describe("unusedDropPatterns", () => {
+  it("names a pattern this feed has nothing for", () => {
+    const unused = unusedDropPatterns(["OCETrain TER", "OCETGV INOUI"], DEFAULTS);
+    expect(unused.map((p) => p.source)).toContain("OUIGO");
+    expect(unused.map((p) => p.source)).not.toContain("TGV");
+  });
+
+  it("says nothing when every pattern earned its place", () => {
+    expect(unusedDropPatterns(["OCETGV INOUI"], asFilter(["TGV"]))).toEqual([]);
   });
 });
 
@@ -136,6 +190,18 @@ describe("loading a feed that uses SNCF id conventions", () => {
       "Lyon Part Dieu",
       "Saint-Étienne Châteaucreux",
     ]);
+  });
+
+  it("keeps regional and Intercités but not TGV, under the shipped defaults", async () => {
+    const index = await loadTimetable({
+      zipPath: FEED,
+      keepRoutePatterns: [],
+      dropRoutePatterns: [],
+      keepStopKinds: [],
+      dropStopKindPatterns: DEFAULT_DROP_STOP_KINDS.map((p) => new RegExp(p, "i")),
+    });
+    const kinds = new Set(index.stops.map((s) => stopKind(s.id)));
+    expect([...kinds].sort()).toEqual(["OCEINTERCITES", "OCETrain TER"]);
   });
 
   it("brings back TGV and Intercités when the kind filter is lifted", async () => {

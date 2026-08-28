@@ -215,10 +215,20 @@
   },
   "gtfs": {
     "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
-    "$comment": "The SNCF feed encodes service type in the stop point id, not in routes.txt. Run `npm run ingest -- --explain-routes` to list the kinds this feed contains.",
-    "keepStopKinds": [
-      "OCETrain TER"
+    "$comment": "The SNCF feed encodes service type in the stop point id, not in routes.txt. Every `npm run ingest` prints the kinds it found and what this filter did with each; `npm run stations -- <name>` shows what calls at one place, unfiltered.",
+    "$kindComment": "Said as what to leave out, not what to keep: regional trains are branded by region (TER, but also BreizhGo, Nomad, liO, Rémi, ZOU!, Mobigo, Aléop), so naming the ones you want silently loses whichever region you forgot. These patterns leave out long-distance rail, where a bike needs a bag or a reservation, and road replacements. Set keepStopKinds to an exact list to override this entirely.",
+    "dropStopKindPatterns": [
+      "TGV",
+      "OUIGO",
+      "EUROSTAR",
+      "THALYS",
+      "LYRIA",
+      "de nuit",
+      "^OCECar",
+      "^OCEBus",
+      "NAVETTE"
     ],
+    "keepStopKinds": [],
     "keepRoutePatterns": [],
     "dropRoutePatterns": []
   },

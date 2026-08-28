@@ -10,6 +10,7 @@ import { formatDate } from "./gtfs/time.js";
 import { buildPlan, writePlan } from "./build/buildPlan.js";
 import { resolveHome, searchStations } from "./build/stations.js";
 import { sampleDates } from "./build/dates.js";
+import { keepKind, stopKind, type KindFilter } from "./gtfs/serviceKind.js";
 import { sampleRideField, sampleCount } from "./bike/field.js";
 import type { Grid } from "./bike/contour.js";
 
@@ -62,6 +63,30 @@ function parseArgs(argv: string[]): Flags {
 }
 
 /** Downloads the feed unless --feed pointed at a local copy. */
+/**
+ * What calls at a station, by service kind, with the lines each kind carries.
+ *
+ * The answer to "why is there nothing at Lorient": either no train reaches it
+ * in your window, or the trains that do are a kind your config leaves out. Only
+ * the feed can tell the two apart, and only if nothing has been filtered before
+ * you look.
+ */
+function servicesAt(index: TimetableIndex, stationId: string): Array<[string, Set<string>]> {
+  const byKind = new Map<string, Set<string>>();
+  for (const stopIndex of index.stopsInStation.get(stationId) ?? []) {
+    const stop = index.stops[stopIndex];
+    if (!stop) continue;
+    const kind = stopKind(stop.id) ?? "(no kind)";
+    let routes = byKind.get(kind);
+    if (!routes) byKind.set(kind, (routes = new Set<string>()));
+    for (const patternId of index.patternsAtStop[stopIndex] ?? []) {
+      const trip = index.patterns[patternId]?.trips[0];
+      if (trip) routes.add(trip.routeName);
+    }
+  }
+  return [...byKind].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
 async function feedPath(flags: Flags, url: string): Promise<string> {
   if (flags.feed) return flags.feed;
   if (!url) throw new Error("config/home.json: gtfs.url is empty, or pass --feed <path>");
@@ -112,6 +137,7 @@ async function main(): Promise<void> {
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
         ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
         keepStopKinds: config.gtfs.keepStopKinds,
+        dropStopKindPatterns: config.gtfs.dropStopKindPatterns,
         explainRoutes: flags.explainRoutes,
       });
 
@@ -137,17 +163,32 @@ async function main(): Promise<void> {
       const query = flags.rest.join(" ");
       if (!query) throw new Error("Usage: npm run stations -- <name>");
       const feed = await feedPath(flags, config.gtfs.url);
+      // Deliberately unfiltered, unlike every other command. This is the tool
+      // you reach for when somewhere looks emptier than it should, and it can
+      // only answer that by showing what your filter is leaving out.
+      console.log("Reading the whole feed, with no service filter…\n");
       const index = await loadTimetable({
         zipPath: feed,
-        keepRoutePatterns: config.gtfs.keepRoutePatterns,
-        dropRoutePatterns: config.gtfs.dropRoutePatterns,
-        ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
-        keepStopKinds: config.gtfs.keepStopKinds,
+        keepRoutePatterns: [],
+        dropRoutePatterns: [],
+        keepStopKinds: [],
+        dropStopKindPatterns: [],
       });
+      const filter: KindFilter = {
+        keep: new Set(config.gtfs.keepStopKinds),
+        drop: config.gtfs.dropStopKindPatterns,
+      };
       const matches = searchStations(index, query);
       if (matches.length === 0) console.log(`No station matches ${JSON.stringify(query)}`);
       for (const match of matches.slice(0, 30)) {
-        console.log(`${match.stationId}\t${match.name}\t${match.lat},${match.lon}`);
+        console.log(`\n${match.stationId}\t${match.name}\t${match.lat},${match.lon}`);
+        for (const [kind, routes] of servicesAt(index, match.stationId)) {
+          const kept = keepKind(kind, filter);
+          console.log(
+            `  ${kept ? "+" : "-"} ${kind}${kept ? "" : "  (left out by your config)"}`,
+          );
+          console.log(`      ${[...routes].slice(0, 6).join(", ")}`);
+        }
       }
       break;
     }
@@ -160,6 +201,7 @@ async function main(): Promise<void> {
         dropRoutePatterns: config.gtfs.dropRoutePatterns,
         ...(config.gtfs.keepRouteTypes ? { keepRouteTypes: config.gtfs.keepRouteTypes } : {}),
         keepStopKinds: config.gtfs.keepStopKinds,
+        dropStopKindPatterns: config.gtfs.dropStopKindPatterns,
         explainRoutes: flags.explainRoutes,
       });
       if (flags.brouter) config.ride.brouterUrl = flags.brouter;
@@ -223,7 +265,7 @@ async function main(): Promise<void> {
           "",
           "  ingest      download the feed and check it against your config",
           "  plan        build public/data/plan.json for the web app",
-          "  stations    search station names in the feed",
+          "  stations    what calls at a station, with no service filter applied",
           "",
           "Flags:",
           "  --feed <path>        use a local .zip or extracted directory instead of downloading",

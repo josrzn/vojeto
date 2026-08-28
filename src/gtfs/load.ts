@@ -11,7 +11,12 @@ import { at, columnIndex, parseCsv } from "./csv.js";
 import { emptyCalendar } from "./calendar.js";
 import { deriveLookups } from "./lookups.js";
 import { diagnose, keepRoute, type RouteFilter, type RouteInfo } from "./routeFilter.js";
-import { keepStop, summariseKinds } from "./serviceKind.js";
+import {
+  keepStop,
+  summariseKinds,
+  unusedDropPatterns,
+  type KindFilter,
+} from "./serviceKind.js";
 import { countServicesPerDate, plannableEnd } from "./coverage.js";
 import { formatDate, parseTime } from "./time.js";
 
@@ -25,11 +30,17 @@ export interface LoadOptions {
   /** When set, restricts to these route_type values instead of "any rail type". */
   keepRouteTypes?: number[];
   /**
-   * Stop point kinds to keep, e.g. "OCETrain TER". This is the filter that
-   * actually separates TER from TGV, Intercités and replacement coaches.
-   * Empty keeps everything.
+   * Exact stop point kinds to keep, e.g. "OCETrain TER". Empty — the usual
+   * case — means "everything `dropStopKindPatterns` leaves".
    */
   keepStopKinds?: string[];
+  /**
+   * Stop kinds to leave out, as patterns. This is the filter that actually
+   * separates regional trains from TGV, night trains and replacement coaches,
+   * and it is written as a deny list so that a regional brand nobody here has
+   * heard of is kept rather than silently lost.
+   */
+  dropStopKindPatterns?: RegExp[];
   /** Print the full route diagnostic, then continue. */
   explainRoutes?: boolean;
 }
@@ -140,16 +151,27 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
 
   // --- trips ----------------------------------------------------------------
   const trips = new Map<string, RawTrip>();
+  const bikesAllowed = new Map<string, number>();
   await readTable(zipPath, "trips.txt", (row, header) => {
-    const [tripId, routeId, serviceId, headsign] = columnIndex(
+    const [tripId, routeId, serviceId, headsign, bikes] = columnIndex(
       header,
       "trip_id",
       "route_id",
       "service_id",
       "trip_headsign",
+      "bikes_allowed",
     );
     const routeName = keptRoutes.get(at(row, routeId!));
     if (routeName === undefined) return;
+    // GTFS has a field for the question this whole project turns on: 1 means a
+    // bike fits, 2 means it does not, 0 or absent means nobody said. Counted
+    // rather than acted on, because a feed that leaves it empty — as this one
+    // may — would filter everything away. If the numbers below show it is
+    // populated, it beats guessing from the service's name.
+    bikesAllowed.set(
+      at(row, bikes!) || "0",
+      (bikesAllowed.get(at(row, bikes!) || "0") ?? 0) + 1,
+    );
     trips.set(at(row, tripId!), {
       serviceId: at(row, serviceId!),
       headsign: at(row, headsign!),
@@ -160,7 +182,14 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
       sequence: [],
     });
   });
-  console.log(`Trips: kept ${trips.size}`);
+  const declared = (bikesAllowed.get("1") ?? 0) + (bikesAllowed.get("2") ?? 0);
+  console.log(
+    `Trips: kept ${trips.size}` +
+      (declared > 0
+        ? `, of which ${bikesAllowed.get("1") ?? 0} say a bike is welcome and ` +
+          `${bikesAllowed.get("2") ?? 0} say it is not`
+        : ", none of which say anything about bikes (trips.txt has no bikes_allowed)"),
+  );
 
   // --- calendars ------------------------------------------------------------
   const services = new Map<string, ServiceCalendar>();
@@ -253,20 +282,41 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     });
   });
 
-  const kindSummary = summariseKinds(allStops.keys());
-  const describeKinds = () =>
-    [...kindSummary]
-      .sort((a, b) => b[1] - a[1])
-      .map(([kind, count]) => `  ${String(count).padStart(6)}  ${kind}`)
-      .join("\n");
+  const kindFilter: KindFilter = {
+    keep: new Set(options.keepStopKinds ?? []),
+    drop: options.dropStopKindPatterns ?? [],
+  };
 
-  if (options.explainRoutes) {
-    console.log(`\nStop kinds in stops.txt (gtfs.keepStopKinds selects from these):`);
-    console.log(describeKinds());
-    console.log(
-      `\nKeeping: ${options.keepStopKinds?.length ? options.keepStopKinds.join(", ") : "(everything)"}\n`,
+  // Printed on every run, not only under --explain-routes. Which services this
+  // feed contains, and which of them you are about to plan with, is the single
+  // most consequential thing about the ingest, and it is the one thing you
+  // cannot infer from the numbers that follow.
+  const kindSummary = summariseKinds(allStops.keys());
+  console.log("\nStop kinds in stops.txt:");
+  for (const [kind, count] of [...kindSummary].sort((a, b) => b[1] - a[1])) {
+    const judged = kind.startsWith("(") ? " " : keepStop(`StopPoint:${kind}-0`, kindFilter) ? "+" : "-";
+    console.log(`  ${judged} ${String(count).padStart(6)}  ${kind}`);
+  }
+  console.log(
+    kindFilter.keep.size > 0
+      ? `  keeping exactly: ${[...kindFilter.keep].join(", ")}`
+      : kindFilter.drop.length > 0
+        ? `  keeping everything except: ${kindFilter.drop.map((p) => p.source).join(", ")}`
+        : "  keeping everything",
+  );
+
+  // Only worth saying when the feed uses the convention at all: a feed whose
+  // stop ids carry no kind is not filtered by any of this, and saying that nine
+  // patterns matched nothing would be true and useless.
+  const realKinds = [...kindSummary.keys()].filter((kind) => !kind.startsWith("("));
+  const unused = realKinds.length > 0 ? unusedDropPatterns(realKinds, kindFilter) : [];
+  if (unused.length > 0) {
+    console.warn(
+      `  note: ${unused.map((p) => p.source).join(", ")} matched nothing in this feed — ` +
+        "either it carries no such service, or the name has changed.",
     );
   }
+  console.log();
 
   // --- stop_times -----------------------------------------------------------
   const stops: Stop[] = [];
@@ -286,7 +336,6 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     return stops.length - 1;
   };
 
-  const keptKinds = new Set(options.keepStopKinds ?? []);
   let scanned = 0;
   let skippedKind = 0;
   await readTable(zipPath, "stop_times.txt", (row, header) => {
@@ -304,7 +353,7 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
     const stop = at(row, stopId!);
     // Trips are homogeneous in stop kind, so dropping the rows also drops the
     // trip: it ends up with too few stops to be usable and is discarded below.
-    if (!keepStop(stop, keptKinds)) {
+    if (!keepStop(stop, kindFilter)) {
       skippedKind++;
       return;
     }
@@ -377,10 +426,10 @@ export async function loadTimetable(options: LoadOptions): Promise<TimetableInde
 
   if (patterns.length === 0) {
     throw new Error(
-      `No usable trips remain after filtering.\n\n` +
-        `gtfs.keepStopKinds is ${JSON.stringify(options.keepStopKinds ?? [])}, ` +
-        `but stops.txt contains:\n${describeKinds()}\n\n` +
-        `Set gtfs.keepStopKinds in config/home.json to one or more of the kinds above.`,
+      "No usable trips remain after filtering.\n\n" +
+        "The stop kinds this feed contains, and what the filter did with each, " +
+        "are listed above.\nAdjust gtfs.dropStopKindPatterns (or gtfs.keepStopKinds, " +
+        "which overrides it) in config/home.json.",
     );
   }
 
