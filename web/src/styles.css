@@ -128,13 +128,20 @@ code {
   color: #93a1b0;
 }
 
+/* The one scrolling region in the sidebar. Everything a setting can change
+   lives inside it — the panels, the count, the list, what fell outside the
+   circle — so opening a tall panel never pushes the thing you are watching off
+   the bottom of the screen. */
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .corridors {
   list-style: none;
   margin: 0;
   padding: 0 0.5rem 1rem;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
 }
 
 .corridor + .corridor {
@@ -450,6 +457,12 @@ code {
   cursor: pointer;
 }
 .detail-close:hover { color: var(--ink); }
+/* The panels in the sidebar put their close button in a flex header, which
+   already places it. Absolute positioning belongs to the trip panel, which is
+   itself positioned; anywhere else it escapes to the page and lands in the
+   top-right corner of the map, on top of the zoom control, where it is both
+   invisible and unclickable. */
+.settings-head .detail-close { position: static; padding: 0; }
 
 .legs, .stages {
   list-style: none;
@@ -647,6 +660,15 @@ code {
   border-color: var(--bike);
   background: #fdf0f2;
   color: var(--ink);
+}
+
+/* The consequence of every slider in the panel, in one line that never
+   scrolls out of sight. */
+.settings-count {
+  margin: 0.3rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-note {

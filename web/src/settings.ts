@@ -1,4 +1,5 @@
-import { maxRideKm, type Budget, type EffortModel } from "../../src/bike/effort.js";
+import { type Budget, type EffortModel } from "../../src/bike/effort.js";
+import { flatKmh } from "../../src/bike/speed.js";
 import { parseTime } from "../../src/gtfs/time.js";
 import type { Query } from "../../src/router/raptor.js";
 import type { Plan } from "../../src/build/buildPlan.js";
@@ -212,9 +213,43 @@ export function queryFor(home: Home, date: number, settings: Settings): Query {
   };
 }
 
-/** The radius of the ring on the map: what you set, or what the day allows. */
+/**
+ * The most of the day that can go on the train before the ride is the loser.
+ *
+ * A fifth of it, capped at two hours: enough to be a real journey out, not so
+ * much that the circle assumes you spent the morning sitting down.
+ */
+const TRAIN_SHARE = 0.2;
+const TRAIN_CAP_HOURS = 2;
+
+/**
+ * What a flat-speed figure is worth as a straight line on a map.
+ *
+ * Two losses in one number, both unavoidable and both in the same direction:
+ * nobody holds their flat speed for eight hours over real ground, and a road
+ * between two places is longer than the line between them. Seven tenths is a
+ * fair reckoning of the pair; the point is that it is well under one.
+ */
+const AS_THE_CROW_FLIES = 0.7;
+
+/**
+ * The radius of the ring on the map: what you set, or a guess at your day.
+ *
+ * The guess used to be the theoretical maximum — the whole day at the fastest
+ * speed on the curve, with no train journey at all. That is a true bound and a
+ * useless filter: 184 km for a ten-hour day, which is most of a region and
+ * further than any of it is rideable. It never hid anything because it never
+ * excluded anything.
+ *
+ * This is a guess at a real day instead, and being a guess it can be wrong in
+ * both directions — which is why what falls outside it is listed by name rather
+ * than counted. A circle that hides things has to show what it hid.
+ */
 export function circleKm(settings: Settings, effort: EffortModel): number {
-  return settings.radiusKm ?? Math.round(maxRideKm(0, budgetOf(settings), effort));
+  if (settings.radiusKm !== null) return settings.radiusKm;
+  const onTheTrain = Math.min(TRAIN_CAP_HOURS, settings.budgetHours * TRAIN_SHARE);
+  const riding = Math.max(0, settings.budgetHours - onTheTrain);
+  return Math.max(10, Math.round(riding * flatKmh(effort.curves.paved) * AS_THE_CROW_FLIES));
 }
 
 function readJson(key: string): unknown {

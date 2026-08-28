@@ -9,6 +9,8 @@ interface Props {
   radiusKm: number;
   /** How fast you ride, which is read from config rather than edited here. */
   curves: SpeedCurves;
+  /** What the settings currently produce, so a change can be seen as it is made. */
+  counts: { inside: number; beyond: number; querying: boolean };
   styles: RouteStyle[];
   onChange: (settings: Settings) => void;
   onClose: () => void;
@@ -34,7 +36,15 @@ const DAY_TYPES: Array<{ id: DayType; label: string }> = [
  * fetched. Neither re-routes anything: how long a road takes does not depend on
  * how much time you have.
  */
-export function SettingsPanel({ settings, radiusKm, curves, styles, onChange, onClose }: Props) {
+export function SettingsPanel({
+  settings,
+  radiusKm,
+  curves,
+  counts,
+  styles,
+  onChange,
+  onClose,
+}: Props) {
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
 
   return (
@@ -45,6 +55,17 @@ export function SettingsPanel({ settings, radiusKm, curves, styles, onChange, on
           ×
         </button>
       </header>
+
+      {/* Kept at the top of the panel rather than left down in the list, so
+          every slider here has a visible consequence while you are moving it. */}
+      <p className="settings-count" aria-live="polite">
+        {counts.querying
+          ? "asking the timetable…"
+          : `${counts.inside} station${counts.inside === 1 ? "" : "s"} inside ${radiusKm} km` +
+            (counts.beyond > 0
+              ? `, ${counts.beyond} the train reaches beyond it`
+              : ", and none further out")}
+      </p>
 
       <h4 className="settings-group">The train out</h4>
 
@@ -173,9 +194,15 @@ export function SettingsPanel({ settings, radiusKm, curves, styles, onChange, on
         format={(v) => `${v} km`}
         onChange={(km) => set({ radiusKm: km })}
       />
-      {settings.radiusKm !== null && (
+      {settings.radiusKm === null ? (
+        <span className="setting-hint">
+          Reckoned from your day: what is left after the train, at your flat
+          speed, less a third for hills and for roads not running straight. A
+          guess, not a bound — what falls outside it is listed under the map.
+        </span>
+      ) : (
         <button type="button" className="settings-reset" onClick={() => set({ radiusKm: null })}>
-          Use what the day allows ({radiusKm} km)
+          Back to what your day suggests
         </button>
       )}
 

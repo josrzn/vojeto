@@ -137,6 +137,16 @@ export function MapView({
   // Read when the map is built, which happens after the first render.
   const homeRef = useRef(home);
   homeRef.current = home;
+  /**
+   * The ride the map has already framed.
+   *
+   * Framing is a one-off reaction to picking a ride, not a property of showing
+   * one. Without this the map re-fits on every render that hands it a freshly
+   * built variant object — which is most of them — and the effect is a map that
+   * creeps back to where it wants to be every time you touch anything, and
+   * cannot be panned at all while a station is selected.
+   */
+  const framed = useRef<string | null>(null);
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -637,6 +647,7 @@ export function MapView({
       if (!ride) {
         routeSource.setData(emptyCollection());
         stagesSource.setData(emptyCollection());
+        framed.current = null;
         return;
       }
 
@@ -682,6 +693,12 @@ export function MapView({
         ),
       });
 
+      // Frame it once, when it becomes the ride on screen. After that the view
+      // is yours.
+      const key = `${selected ?? ""}|${ride.id}`;
+      if (framed.current === key) return;
+      framed.current = key;
+
       const bounds = ride.geometry.reduce(
         (box, [lon, lat]) => box.extend([lon!, lat!]),
         new maplibregl.LngLatBounds(
@@ -699,7 +716,7 @@ export function MapView({
     };
 
     paint();
-  }, [ready, variant, profile]);
+  }, [ready, variant, profile, selected]);
 
   return <div className="map" ref={container} />;
 }

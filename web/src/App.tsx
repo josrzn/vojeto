@@ -17,6 +17,7 @@ import { HomePicker } from "./HomePicker.js";
 import { Timetable } from "./timetableClient.js";
 import type { Loaded, Station } from "./timetableService.js";
 import { explore, quickestTrains, type Home } from "./explore.js";
+import type { Itinerary } from "../../src/shared/types.js";
 import { warmCache, withVariant, type Rides } from "./rides.js";
 import { routeRide } from "./routeHome.js";
 import type { BikeTrack } from "../../src/bike/track.js";
@@ -99,6 +100,7 @@ export function App() {
   const [showField, setShowField] = useState(true);
   const [showNoTrain, setShowNoTrain] = useState(false);
   const [showFrontier, setShowFrontier] = useState(false);
+  const [showMisses, setShowMisses] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useRemembered("vojeto.sidebar", true);
   const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -106,8 +108,7 @@ export function App() {
   const [placing, setPlacing] = useState(false);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const [destinations, setDestinations] = useState<PlanDestination[]>([]);
-  const [outOfRange, setOutOfRange] = useState(0);
+  const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [querying, setQuerying] = useState(false);
   const [rides, setRides] = useState<Rides>({});
   const [profiles, setProfiles] = useState<Record<string, LoadedProfile>>({});
@@ -216,7 +217,9 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, homeKey]);
 
-  // The candidates: everywhere the train gets you in time, inside the circle.
+  // Everywhere the train gets you in time. Asked of the worker, which answers in
+  // a few milliseconds; the circle is applied to the answer rather than being
+  // part of the question, so moving the radius costs nothing at all.
   useEffect(() => {
     const client = timetable.current;
     if (!client || !home || !month || !loaded) return;
@@ -225,11 +228,9 @@ export function App() {
     setQuerying(true);
     client
       .reachable(queryFor(home, month.date, settings))
-      .then((itineraries) => {
+      .then((found) => {
         if (cancelled) return;
-        const found = explore(itineraries, home.rideTo, radiusKm);
-        setDestinations(found.destinations);
-        setOutOfRange(found.outOfRange);
+        setItineraries(found);
         setQuerying(false);
       })
       .catch((error: unknown) => {
@@ -241,9 +242,20 @@ export function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, homeKey, month?.date, radiusKm, settings.arriveBy, settings.arriveNoEarlierThan,
+  }, [loaded, homeKey, month?.date, settings.arriveBy, settings.arriveNoEarlierThan,
       settings.earliestDeparture, settings.maxTravelMinutes, settings.maxTransfers,
       settings.minTransferMinutes, settings.maxTransferMinutes]);
+
+  // The circle, applied. Pure arithmetic over an answer already in hand, so the
+  // list and the map follow the radius slider as it moves.
+  const { destinations, outside } = useMemo(
+    () =>
+      home
+        ? explore(itineraries, home.rideTo, radiusKm)
+        : { destinations: [], outside: [] },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [itineraries, home?.rideTo.lat, home?.rideTo.lon, radiusKm],
+  );
 
   const trainHours = useMemo(() => quickestTrains(destinations), [destinations]);
 
@@ -310,13 +322,20 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chosen?.stationId, style.id]);
 
-  const judged = chosen
-    ? judge(
-        rides[chosen.stationId] ?? [],
-        trainHours[chosen.stationId] ?? chosen.travelMinutes / 60,
-        budget,
-      )
-    : null;
+  // Memoised because the map reads the variant objects by identity: rebuilding
+  // them on every render would have it re-frame the ride every time anything at
+  // all changed on screen.
+  const judged = useMemo(
+    () =>
+      chosen
+        ? judge(
+            rides[chosen.stationId] ?? [],
+            trainHours[chosen.stationId] ?? chosen.travelMinutes / 60,
+            budget,
+          )
+        : null,
+    [chosen, rides, trainHours, budget],
+  );
   const variants = judged?.variants ?? [];
   const active = variants.find((v) => v.id === variantId) ?? bestVariant(variants) ?? null;
 
@@ -468,116 +487,161 @@ export function App() {
           </nav>
         )}
 
-        {(homeOpen || !home) && (
-          <HomePicker
-            stations={stations}
-            loading={stations === null && timetableError === null}
-            error={timetableError}
-            home={home}
-            placing={placing}
-            onPick={pickHome}
-            onPlace={setPlacing}
-            onClose={() => {
-              setHomeOpen(false);
-              setPlacing(false);
-            }}
-          />
-        )}
-
-        {settingsOpen && (
-          <SettingsPanel
-            settings={settings}
-            radiusKm={radiusKm}
-            curves={curves}
-            styles={styles}
-            onChange={chooseSettings}
-            onClose={() => setSettingsOpen(false)}
-          />
-        )}
-
-        {home && month && (
-          <p className="month-note">
-            {querying
-              ? "Asking the timetable…"
-              : `${month.label} · ${stationCount} station${stationCount === 1 ? "" : "s"} within reach` +
-                (outOfRange > 0 ? `, ${outOfRange} outside the circle` : "")}
-          </p>
-        )}
-
-        <ul className="corridors">
-          {corridors.map((corridor) => {
-            const isOpen = openCorridors.has(corridor.name);
-            const holdsSelection = corridor.destinations.some((d) => d.stationId === selected);
-            return (
-              <li key={corridor.name} className="corridor">
-                <button
-                  type="button"
-                  className={holdsSelection ? "corridor-head is-active" : "corridor-head"}
-                  onClick={() => toggleCorridor(corridor.name)}
-                  aria-expanded={isOpen}
-                >
-                  <span className="corridor-caret">{isOpen || holdsSelection ? "▾" : "▸"}</span>
-                  <span className="corridor-name">{corridor.name}</span>
-                  <span className="corridor-range">
-                    {corridor.destinations.length} stations ·{" "}
-                    {formatMinutes(corridor.quickestTrainMinutes)}–
-                    {formatMinutes(corridor.slowestTrainMinutes)} out
-                  </span>
-                </button>
-
-                {(isOpen || holdsSelection) && (
-                  <ul className="results">
-                    {corridor.destinations.map((destination) => {
-                      const ride = bestVariant(rides[destination.stationId]);
-                      const isSelected = destination.stationId === selected;
-                      return (
-                        <li key={destination.stationId} ref={isSelected ? selectedRow : null}>
-                          <button
-                            type="button"
-                            className={isSelected ? "result is-selected" : "result"}
-                            onClick={() => {
-                              setSelected(destination.stationId);
-                              setVariantId(null);
-                            }}
-                          >
-                            <span className="result-name">{destination.name}</span>
-                            <span className="result-train">
-                              {destination.departure} → {destination.arrival} ·{" "}
-                              {destination.travel}
-                              {destination.transfers > 0 &&
-                                ` · ${destination.transfers} change${destination.transfers > 1 ? "s" : ""}` +
-                                  ` (${destination.worstWaitMinutes} min)`}
-                            </span>
-                            {ride ? (
-                              <span
-                                className={ride.feasible ? "result-ride" : "result-ride is-over"}
-                                title={ride.feasible ? undefined : "Longer than the day allows"}
-                              >
-                                🚲 {Math.round(ride.km)} km · +{ride.ascentMetres} m ·{" "}
-                                {formatHours(ride.hours)}
-                                {ride.days > 1 && ` · ${ride.days} days`}
-                              </span>
-                            ) : (
-                              routing?.stationId === destination.stationId && (
-                                <span className="result-ride">🚲 finding the way home…</span>
-                              )
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-          {home && !querying && corridors.length === 0 && (
-            <li className="empty">
-              No train gets you anywhere inside {radiusKm} km by {settings.arriveBy}. Try a
-              later arrival, another change, or a wider circle.
-            </li>
+        {/* One scrolling region for everything the settings change, so a tall
+            panel pushes the list down rather than off the bottom of the screen
+            where nobody can see it react. */}
+        <div className="sidebar-body">
+          {(homeOpen || !home) && (
+            <HomePicker
+              stations={stations}
+              loading={stations === null && timetableError === null}
+              error={timetableError}
+              home={home}
+              placing={placing}
+              onPick={pickHome}
+              onPlace={setPlacing}
+              onClose={() => {
+                setHomeOpen(false);
+                setPlacing(false);
+              }}
+            />
           )}
-        </ul>
+
+          {settingsOpen && (
+            <SettingsPanel
+              settings={settings}
+              radiusKm={radiusKm}
+              curves={curves}
+              counts={{ inside: destinations.length, beyond: outside.length, querying }}
+              styles={styles}
+              onChange={chooseSettings}
+              onClose={() => setSettingsOpen(false)}
+            />
+          )}
+
+          {home && month && (
+            <p className="month-note">
+              {querying
+                ? "Asking the timetable…"
+                : `${month.label} · ${stationCount} station${stationCount === 1 ? "" : "s"} inside ${radiusKm} km` +
+                  (outside.length > 0 ? `, ${outside.length} beyond` : "")}
+            </p>
+          )}
+
+          <ul className="corridors">
+            {corridors.map((corridor) => {
+              const isOpen = openCorridors.has(corridor.name);
+              const holdsSelection = corridor.destinations.some((d) => d.stationId === selected);
+              return (
+                <li key={corridor.name} className="corridor">
+                  <button
+                    type="button"
+                    className={holdsSelection ? "corridor-head is-active" : "corridor-head"}
+                    onClick={() => toggleCorridor(corridor.name)}
+                    aria-expanded={isOpen}
+                  >
+                    <span className="corridor-caret">{isOpen || holdsSelection ? "▾" : "▸"}</span>
+                    <span className="corridor-name">{corridor.name}</span>
+                    <span className="corridor-range">
+                      {corridor.destinations.length} stations ·{" "}
+                      {formatMinutes(corridor.quickestTrainMinutes)}–
+                      {formatMinutes(corridor.slowestTrainMinutes)} out
+                    </span>
+                  </button>
+
+                  {(isOpen || holdsSelection) && (
+                    <ul className="results">
+                      {corridor.destinations.map((destination) => {
+                        const ride = bestVariant(rides[destination.stationId]);
+                        const isSelected = destination.stationId === selected;
+                        return (
+                          <li key={destination.stationId} ref={isSelected ? selectedRow : null}>
+                            <button
+                              type="button"
+                              className={isSelected ? "result is-selected" : "result"}
+                              onClick={() => {
+                                setSelected(destination.stationId);
+                                setVariantId(null);
+                              }}
+                            >
+                              <span className="result-name">{destination.name}</span>
+                              <span className="result-train">
+                                {destination.departure} → {destination.arrival} ·{" "}
+                                {destination.travel}
+                                {destination.transfers > 0 &&
+                                  ` · ${destination.transfers} change${destination.transfers > 1 ? "s" : ""}` +
+                                    ` (${destination.worstWaitMinutes} min)`}
+                              </span>
+                              {ride ? (
+                                <span
+                                  className={ride.feasible ? "result-ride" : "result-ride is-over"}
+                                  title={ride.feasible ? undefined : "Longer than the day allows"}
+                                >
+                                  🚲 {Math.round(ride.km)} km · +{ride.ascentMetres} m ·{" "}
+                                  {formatHours(ride.hours)}
+                                  {ride.days > 1 && ` · ${ride.days} days`}
+                                </span>
+                              ) : (
+                                routing?.stationId === destination.stationId && (
+                                  <span className="result-ride">🚲 finding the way home…</span>
+                                )
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+            {home && !querying && corridors.length === 0 && (
+              <li className="empty">
+                No train gets you anywhere inside {radiusKm} km by {settings.arriveBy}. Try a
+                later arrival, another change, or a wider circle.
+              </li>
+            )}
+          </ul>
+
+          {outside.length > 0 && (
+            <div className="misses">
+              <button
+                type="button"
+                className="misses-head"
+                onClick={() => setShowMisses((v) => !v)}
+                aria-expanded={showMisses}
+              >
+                {showMisses ? "▾" : "▸"} {outside.length} beyond the {radiusKm} km circle
+              </button>
+              {showMisses && (
+                <>
+                  <ul className="miss-list">
+                    {outside.slice(0, 8).map((miss) => (
+                      <li key={miss.stationId}>
+                        <span className="miss-name">{miss.name}</span>
+                        <span className="miss-figures">
+                          {formatMinutes(miss.travelMinutes)} on the train
+                        </span>
+                        <span className="miss-need">{Math.round(miss.km)} km out</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {outside[0] && (
+                    <button
+                      type="button"
+                      className="settings-reset"
+                      onClick={() =>
+                        chooseSettings({ ...settings, radiusKm: Math.ceil(outside[0]!.km / 10) * 10 })
+                      }
+                    >
+                      Widen to {Math.ceil(outside[0].km / 10) * 10} km, for {outside[0].name}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         <footer className="colophon">
           Feed {formatDate(loaded.feedStart)} → {formatDate(loaded.plannableEnd)}. Riding at{" "}

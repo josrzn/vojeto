@@ -111,9 +111,14 @@ that is usually exactly where someone aims.
 **The answers about you** — when you want to be off a train, how many changes
 you will put up with, how long a day you want, how far it is worth looking, and
 which way home to offer first — live under **Settings**, and hold across every
-question you ask afterwards. Changing the train half re-runs a RAPTOR query in
-the worker, which is a few milliseconds. Changing the day half is arithmetic
-over rides already fetched. Neither re-routes anything.
+question you ask afterwards.
+
+All of it takes effect as you move it, and the panel says so: a line at the top
+counts the stations inside the circle and the ones the train reaches beyond it,
+and updates while you drag. Changing the train half re-runs a RAPTOR query in
+the worker, which is a few milliseconds; changing the circle is arithmetic over
+an answer already in hand, so the list follows the slider; changing the day half
+re-judges rides already fetched. Nothing here re-routes anything.
 
 The pair and the settings are both remembered. On the next visit the app opens
 on the last pair you asked about — not on a town somebody wrote into the source.
@@ -128,9 +133,18 @@ never shorter than the crow flight, so a circle drawn by the budget admits
 places a real road will not reach — that is the trade — and hides none that
 would have worked.
 
-By default the radius is as far as the day could carry you with no train at all.
-**Look this far around home** in the settings pins it to something smaller when
-you do not want to see that far today.
+By default the radius is a guess at your day: what is left of it after the
+train, at your flat speed, less a third for hills and for roads not running
+straight — about 90 km for a ten-hour day. It used to be the theoretical
+maximum, the whole day at the fastest speed on the curve with no train journey
+at all, which came to 184 km and excluded nothing. A filter that excludes
+nothing is not a filter.
+
+Being a guess, it can be wrong in both directions, so **what falls outside it is
+listed by name** under the station list, with how far out each one is and a
+button that widens the circle to take in the nearest. A circle that hides things
+has to show what it hid. **Look this far around home** in the settings pins it
+to any radius you like.
 
 ### Routing from the page
 

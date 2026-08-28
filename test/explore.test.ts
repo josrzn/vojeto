@@ -34,17 +34,20 @@ describe("explore", () => {
   it("keeps a station inside the circle", () => {
     // Roughly 40 km north: well inside a hundred.
     const near = itinerary("Near", 46.3, 4.2, 1);
-    const { destinations, outOfRange } = explore([near], ROANNE, RADIUS_KM);
+    const { destinations, outside } = explore([near], ROANNE, RADIUS_KM);
     expect(destinations.map((d) => d.name)).toEqual(["Near"]);
-    expect(outOfRange).toBe(0);
+    expect(outside).toEqual([]);
   });
 
   it("drops one outside it, without routing to find out", () => {
     // Brittany, from Roanne. No circle a day could justify reaches it.
     const far = itinerary("Lorient", 47.748, -3.366, 3);
-    const { destinations, outOfRange } = explore([far], ROANNE, RADIUS_KM);
+    const { destinations, outside } = explore([far], ROANNE, RADIUS_KM);
     expect(destinations).toEqual([]);
-    expect(outOfRange).toBe(1);
+    // Named, not counted: a circle that hides things has to say what it hid.
+    expect(outside).toEqual([
+      { stationId: "Lorient", name: "Lorient", km: expect.closeTo(597, -1), travelMinutes: 180 },
+    ]);
   });
 
   it("does not care how long the train took", () => {
@@ -73,6 +76,21 @@ describe("explore", () => {
     const at = itinerary("X", 46.034389 + 1.2, 4.079342, 1);
     expect(explore([at], ROANNE, 100).destinations).toHaveLength(0);
     expect(explore([at], ROANNE, 200).destinations).toHaveLength(1);
+  });
+
+  it("names what fell outside, nearest first and once each", () => {
+    const { outside } = explore(
+      [
+        itinerary("Far", 47.5, 4.079342, 2),
+        itinerary("Near-ish", 47.0, 4.079342, 1),
+        itinerary("Near-ish", 47.0, 4.079342, 3),
+      ],
+      ROANNE,
+      50,
+    );
+    expect(outside.map((o) => o.name)).toEqual(["Near-ish", "Far"]);
+    expect(outside[0]!.km).toBeGreaterThan(50);
+    expect(outside[0]!.travelMinutes).toBe(60);
   });
 
   it("skips an itinerary with no position rather than placing it at zero", () => {

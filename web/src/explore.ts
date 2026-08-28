@@ -15,13 +15,23 @@ export interface Home {
 export interface Exploration {
   destinations: PlanDestination[];
   /**
-   * Stations the train reaches that fall outside the circle.
+   * Stations the train reaches that fall outside the circle, nearest first.
    *
-   * Counted rather than listed: they are excluded by a straight line, which is
-   * enough to leave a place off the map and not enough to say anything else
-   * about it.
+   * Listed rather than counted. The circle is a guess, and a guess that hides
+   * things has to show what it hid — otherwise the only way to discover that
+   * Brest was one kilometre outside your radius is to widen it at random and
+   * see what appears.
    */
-  outOfRange: number;
+  outside: Excluded[];
+}
+
+/** A station the circle left out, and by how much. */
+export interface Excluded {
+  stationId: string;
+  name: string;
+  /** Straight-line distance from the door, in km. */
+  km: number;
+  travelMinutes: number;
 }
 
 /**
@@ -41,18 +51,30 @@ export function explore(
   radiusKm: number,
 ): Exploration {
   const destinations: PlanDestination[] = [];
-  let outOfRange = 0;
+  const outside: Excluded[] = [];
+  const seen = new Set<string>();
 
   for (const itinerary of itineraries) {
     if (!Number.isFinite(itinerary.lat) || !Number.isFinite(itinerary.lon)) continue;
-    if (haversine(rideTo, itinerary) / 1000 > radiusKm) {
-      outOfRange++;
+    const km = haversine(rideTo, itinerary) / 1000;
+    if (km > radiusKm) {
+      // One entry per station: the same place reached twice is one place you
+      // are not being shown, not two.
+      if (seen.has(itinerary.destination)) continue;
+      seen.add(itinerary.destination);
+      outside.push({
+        stationId: itinerary.destination,
+        name: itinerary.destinationName,
+        km,
+        travelMinutes: Math.round(itinerary.duration / 60),
+      });
       continue;
     }
     destinations.push(toDestination(itinerary));
   }
 
-  return { destinations, outOfRange };
+  outside.sort((a, b) => a.km - b.km);
+  return { destinations, outside };
 }
 
 /** Hours on the train to each station, keeping the quickest seen. */

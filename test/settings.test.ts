@@ -14,6 +14,7 @@ import {
   type Settings,
 } from "../web/src/settings.js";
 import { TOURING_CURVES } from "../src/bike/speed.js";
+import { maxRideKm } from "../src/bike/effort.js";
 import type { Home } from "../web/src/explore.js";
 import type { Plan } from "../src/build/buildPlan.js";
 
@@ -177,11 +178,24 @@ describe("the circle", () => {
     expect(circleKm({ ...DEFAULT_SETTINGS, radiusKm: 75 }, effort)).toBe(75);
   });
 
-  it("is as far as the day could carry you, when you have not", () => {
+  it("is a guess at your day, when you have not", () => {
+    // Ten hours, two of them on the train, eight at a flat 16 km/h, less a
+    // third for hills and for roads that do not run straight.
+    expect(circleKm({ ...DEFAULT_SETTINGS, budgetHours: 10 }, effort)).toBe(90);
+  });
+
+  /**
+   * The old default was the theoretical maximum — the whole day at the fastest
+   * speed on the curve, no train at all — which came to 184 km for a ten-hour
+   * day. True, and useless: a filter that excludes nothing is not a filter.
+   */
+  it("is well inside what the day could conceivably cover", () => {
     const km = circleKm({ ...DEFAULT_SETTINGS, budgetHours: 10 }, effort);
-    // Ten hours at a flat 16 km/h, with the bound's own slack in it.
-    expect(km).toBeGreaterThan(160);
-    expect(km).toBeLessThan(200);
+    expect(km).toBeLessThan(maxRideKm(0, budgetOf(DEFAULT_SETTINGS), effort) / 1.5);
+  });
+
+  it("never collapses to nothing on a very short day", () => {
+    expect(circleKm({ ...DEFAULT_SETTINGS, budgetHours: 0.5 }, effort)).toBeGreaterThanOrEqual(10);
   });
 
   it("grows with the day and never shrinks", () => {
