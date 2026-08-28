@@ -10,6 +10,9 @@ import {
 } from "../../src/bike/speed.js";
 import { haversine } from "../../src/shared/geo.js";
 import { TripDetail } from "./TripDetail.js";
+import { SettingsPanel } from "./SettingsPanel.js";
+import { reckon } from "./budget.js";
+import type { Budget } from "../../src/bike/effort.js";
 import {
   bestVariant,
   formatHours,
@@ -63,6 +66,55 @@ function useRemembered(key: string, fallback: boolean) {
   return [value, setValue] as const;
 }
 
+/**
+ * The budget the user is looking at, which is the plan's own until they say
+ * otherwise.
+ *
+ * Held as "what the user chose, or nothing yet" rather than as a copy of the
+ * plan's settings. A copy would have to be taken before the plan has loaded —
+ * there is nothing to copy on the first render — and would then never catch up,
+ * which showed as the view being marked "adjusted" when nobody had touched it.
+ *
+ * A remembered choice is clamped to the plan it is applied to on every render:
+ * a budget wider than the file would promise stations that were never routed.
+ */
+function useBudget(built: Budget) {
+  const [chosen, setChosen] = useState<Partial<Budget> | null>(readStoredBudget);
+
+  const budget = useMemo<Budget>(() => {
+    if (!chosen) return built;
+    return {
+      budgetHours: clamp(chosen.budgetHours, built.budgetHours),
+      minHours: clamp(chosen.minHours, Math.max(1, built.budgetHours / 2)),
+      maxDays: clamp(chosen.maxDays, built.maxDays),
+      hoursPerDay: clamp(chosen.hoursPerDay, built.hoursPerDay),
+    };
+  }, [chosen, built]);
+
+  const choose = (next: Budget) => {
+    setChosen(next);
+    try {
+      localStorage.setItem("vojeto.budget", JSON.stringify(next));
+    } catch {
+      // A private window, or storage disabled: the choice holds for this
+      // session and no longer.
+    }
+  };
+  return [budget, choose] as const;
+}
+
+function readStoredBudget(): Partial<Budget> | null {
+  try {
+    const stored = localStorage.getItem("vojeto.budget");
+    return stored ? (JSON.parse(stored) as Partial<Budget>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const clamp = (value: number | undefined, ceiling: number) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(value, ceiling) : ceiling;
+
 type Load =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -80,6 +132,7 @@ export function App() {
   const [showFrontier, setShowFrontier] = useState(false);
   const [profile, setProfile] = useState<LoadedProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useRemembered("vojeto.sidebar", true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
   const selectedRow = useRef<HTMLLIElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -106,6 +159,17 @@ export function App() {
   }, []);
 
   const plan = load.status === "ready" ? load.plan : null;
+
+  const built: Budget = useMemo(
+    () => ({
+      budgetHours: plan?.settings.budgetHours ?? 10,
+      minHours: plan?.settings.minRideHours ?? 0,
+      maxDays: plan?.settings.maxDays ?? 1,
+      hoursPerDay: plan?.settings.hoursPerDay ?? 6,
+    }),
+    [plan],
+  );
+  const [budget, setBudget] = useBudget(built);
 
   // Elevation is fetched per variant rather than shipped in plan.json: at ~10 KB
   // each, all of them together would be several megabytes for data you only look
@@ -158,9 +222,20 @@ export function App() {
     [plan, monthKey],
   );
 
+  // Everything the budget decides is re-decided here rather than read out of
+  // the file, so the sliders move the map without re-routing anything. At the
+  // plan's own settings this reproduces the file exactly.
+  const reckoned = useMemo(
+    () =>
+      plan && month
+        ? reckon(month.destinations, plan.rides, plan.trainHours ?? {}, budget)
+        : null,
+    [plan, month, budget],
+  );
+
   const corridors = useMemo(
-    () => (plan && month ? groupIntoCorridors(month.destinations, plan.rides) : []),
-    [plan, month],
+    () => (reckoned ? groupIntoCorridors(reckoned.destinations, reckoned.rides) : []),
+    [reckoned],
   );
 
   // Selection usually comes from clicking the map, so bring the matching row
@@ -190,7 +265,8 @@ export function App() {
     );
   }
 
-  const { settings, home, rides } = load.plan;
+  const { settings, home } = load.plan;
+  const rides = reckoned?.rides ?? {};
 
   // A plan.json built before speed became a curve carries the two scalars it
   // used instead. Read them rather than crashing on a missing curve: the page
@@ -213,8 +289,16 @@ export function App() {
 
   // Stations the train reaches but the ride home overruns, cheapest first, so
   // the budget needed to bring one in is visible rather than guessed at.
-  const outOfReach = load.plan.rejected
+  const narrowed =
+    budget.budgetHours !== built.budgetHours ||
+    budget.minHours !== built.minHours ||
+    budget.maxDays !== built.maxDays ||
+    budget.hoursPerDay !== built.hoursPerDay;
+
+  const seen = new Set<string>();
+  const outOfReach = [...(reckoned?.rejected ?? []), ...load.plan.rejected]
     .filter((r) => r.verdict === "overruns" && r.neededBudgetHours !== null)
+    .filter((r) => (seen.has(r.stationId) ? false : seen.add(r.stationId)))
     .sort((a, b) => a.neededBudgetHours! - b.neededBudgetHours!);
 
   const toggleCorridor = (name: string) =>
@@ -239,11 +323,19 @@ export function App() {
             ⟨
           </button>
           <h1>Train out, bike back</h1>
+          <button
+            type="button"
+            className="settings-open"
+            onClick={() => setSettingsOpen((open) => !open)}
+            aria-expanded={settingsOpen}
+          >
+            {narrowed ? "your day ·  adjusted" : "your day"}
+          </button>
           <p>
             From <strong>{home.station.name}</strong>, off the train by{" "}
             <strong>{settings.arriveBy}</strong>, home within{" "}
-            <strong>{formatHours(settings.budgetHours)}</strong>
-            {settings.maxDays > 1 && ` over up to ${settings.maxDays} days`}.
+            <strong>{formatHours(budget.budgetHours)}</strong>
+            {budget.maxDays > 1 && ` over up to ${budget.maxDays} days`}.
           </p>
         </header>
 
@@ -259,6 +351,15 @@ export function App() {
             </button>
           ))}
         </nav>
+
+        {settingsOpen && (
+          <SettingsPanel
+            budget={budget}
+            built={built}
+            onChange={setBudget}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
 
         {month && (
           <p className="month-note">

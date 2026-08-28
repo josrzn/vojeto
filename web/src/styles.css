@@ -465,6 +465,70 @@ code {
   .sidebar { border-right: none; border-bottom: 1px solid var(--line); }
 }
 
+/* Settings ---------------------------------------------------------------- */
+
+.settings-open {
+  display: block;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8794a1;
+  cursor: pointer;
+}
+.settings-open:hover { color: var(--ink); }
+
+.settings {
+  margin: 0.5rem 0 0.7rem;
+  padding: 0.6rem 0.7rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+}
+.settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.settings-head h3 { margin: 0 0 0.3rem; font-size: 0.85rem; }
+
+.setting { display: block; margin: 0.5rem 0 0; }
+.setting-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.setting-label strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.setting input[type="range"] { width: 100%; margin: 0.15rem 0 0; accent-color: var(--bike); }
+.setting-hint { display: block; font-size: 0.68rem; color: #93a1b0; }
+
+.settings-note {
+  margin: 0.6rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #93a1b0;
+}
+.settings-note code { font-size: 0.95em; }
+
+.settings-reset {
+  margin: 0.5rem 0 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-size: 0.7rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.settings-reset:disabled { opacity: 0.4; cursor: default; }
+
 /* Elevation profile ------------------------------------------------------- */
 
 .profile { margin: 0.6rem 0 0; }

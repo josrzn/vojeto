@@ -100,6 +100,15 @@ export interface Plan {
   months: Array<{ key: string; label: string; date: string; destinations: PlanDestination[] }>;
   /** Keyed by station id and shared across months: the ride home never changes. */
   rides: Record<string, PlanRideVariant[]>;
+  /**
+   * Hours on the train to each station, as the plan judged it.
+   *
+   * The quickest train across every month, since that is the one leaving the
+   * most time to ride. Shipped so the browser can re-decide what fits when you
+   * move the budget without routing anything — and so that re-deciding at the
+   * settings below reproduces this file exactly rather than approximately.
+   */
+  trainHours: Record<string, number>;
   /** Stations reached by train but with no ride home that fits the budget. */
   rejected: PlanRejection[];
   /**
@@ -347,6 +356,9 @@ export async function buildPlan(
     },
     months,
     rides,
+    trainHours: Object.fromEntries(
+      [...candidates].map(([stationId, candidate]) => [stationId, candidate.trainHours]),
+    ),
     rejected,
     noTrain: stationsWithoutTrains(index, rideTo, config, trainReachable, station),
     field: options.field ?? null,

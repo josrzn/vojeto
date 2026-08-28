@@ -74,6 +74,30 @@ A destination is kept only if `train out + ride home` fits `budgetHours`.
 BRouter's own estimate is shown alongside for comparison but is not used to
 decide anything.
 
+### Moving the budget without rebuilding
+
+The trip panel's **your day** control changes `budgetHours`, `minHours`,
+`maxDays` and `hoursPerDay` live, and the map re-decides itself. Nothing is
+re-routed, because nothing needs to be: how long a ride takes depends on the
+road and your legs, not on how much time you have. Every verdict in the plan is
+arithmetic over durations that are already in the file.
+
+Two things keep it honest.
+
+**Re-deciding at the plan's own settings reproduces the plan exactly.** Not
+approximately — the same verdicts, the same stations, the same order. If it
+did not, the sliders would be quietly showing a different app than the one that
+wrote the file, and you would only notice as numbers that move when nothing was
+touched. The plan therefore ships `trainHours`: the journey each station was
+actually judged by, which is its quickest train across every month rather than
+whichever month is on screen.
+
+**The sliders only narrow.** A station beyond the budget `npm run plan` was run
+with was never routed at all, so raising the budget past it could not reveal it
+— it would promise a longer list and hand you a shorter one. The controls stop
+where the file stops and say why, and a remembered setting is clamped to
+whatever plan it is later applied to.
+
 `minHours` drops the other end: somewhere you could simply have ridden to is not
 worth a train ticket. It is judged against the **most direct** way home, since
 that is how far the place really is — taking a longer route back does not turn a
