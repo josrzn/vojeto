@@ -6,6 +6,8 @@ import maplibregl, {
 } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
 import type { Plan, PlanDestination, PlanRideVariant } from "../../src/build/buildPlan.js";
+import type { Home } from "./explore.js";
+import type { Point } from "../../src/shared/geo.js";
 
 import { contourFeatures } from "../../src/bike/contour.js";
 import { MAP_GRADE_COLORS, bandSeries, type LoadedProfile } from "./grade.js";
@@ -27,7 +29,13 @@ interface Props {
   profile: LoadedProfile | null;
   /** Sample the reader is hovering in the profile chart, echoed on the map. */
   hoverIndex: number | null;
+  /** Where you start and finish, which the picker can move. */
+  home: Home;
+  /** Waiting for a click to place the ride-to point. */
+  placing: boolean;
   onSelect: (stationId: string | null) => void;
+  /** A map click while placing, in [lon, lat]. */
+  onPlace: (at: Point) => void;
 }
 
 const FIELD_SOURCE = "ride-field";
@@ -43,6 +51,9 @@ export function MapView({
   plan,
   destinations,
   selected,
+  home,
+  placing,
+  onPlace,
   variant,
   frontierHours,
   showField,
@@ -99,6 +110,12 @@ export function MapView({
   // rather than closing over a stale one.
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  // The map's listeners are attached once, when the style loads, so they read
+  // these rather than closing over a render's values.
+  const onPlaceRef = useRef(onPlace);
+  onPlaceRef.current = onPlace;
+  const placingRef = useRef(placing);
+  placingRef.current = placing;
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -345,8 +362,16 @@ export function MapView({
         }
 
         instance.on("click", "station-dots", (event) => {
+          // While placing, a click anywhere means "here" — including on a
+          // station dot, which is often exactly where someone aims.
+          if (placingRef.current) return;
           const stationId = event.features?.[0]?.properties?.["stationId"];
           if (typeof stationId === "string") onSelectRef.current(stationId);
+        });
+
+        instance.on("click", (event) => {
+          if (!placingRef.current) return;
+          onPlaceRef.current({ lat: event.lngLat.lat, lon: event.lngLat.lng });
         });
         for (const layer of ["station-dots", "stage-stops"]) {
           instance.on("mouseenter", layer, () => {
@@ -383,15 +408,15 @@ export function MapView({
       source.setData({
         type: "FeatureCollection",
         features: [
-          point(plan.home.rideTo.lon, plan.home.rideTo.lat, {
+          point(home.rideTo.lon, home.rideTo.lat, {
             stationId: "",
             name: "Home",
             isHome: true,
             isSelected: false,
           }),
-          point(plan.home.station.lon, plan.home.station.lat, {
-            stationId: plan.home.station.stationId,
-            name: plan.home.station.name,
+          point(home.at.lon, home.at.lat, {
+            stationId: home.stationId,
+            name: home.name,
             isHome: false,
             isSelected: false,
           }),
@@ -408,7 +433,7 @@ export function MapView({
     };
 
     paint();
-  }, [ready, plan.home, destinations, selected]);
+  }, [ready, home, destinations, selected]);
 
   // The continuous ride-time-home backdrop.
   useEffect(() => {

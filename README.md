@@ -74,6 +74,34 @@ A destination is kept only if `train out + ride home` fits `budgetHours`.
 BRouter's own estimate is shown alongside for comparison but is not used to
 decide anything.
 
+### Starting from somewhere else
+
+**start** in the masthead opens a picker for the two places a trip needs: the
+station you catch the train at, and the point the ride has to finish at. They
+are different places, and the difference is a kilometre of towpath — the planner
+has always kept them apart, and this is that pair made editable.
+
+The station list is 2,497 long, so it is searched rather than scrolled. Names
+that begin with what you typed come first, so "lyon" offers Lyon Part-Dieu
+before Bellegarde-sur-Valserine. The ride-to point has no list, because it is a
+spot on a map: arm **move it** and the next map click is your door. While armed
+a click on a station dot places the point rather than selecting the station,
+since that is usually exactly where someone aims.
+
+Changing either runs a RAPTOR query in the worker and redraws. The timetable is
+fetched the first time the picker is opened, not on page load: it is 860 KB and
+only wanted by someone who is about to move.
+
+**What you get away from the plan's own home is the train half only.** No ride
+has been routed from a station you just picked, so there are no distances, no
+gradients and no verdicts — and the panel says so rather than leaving the
+figures from somewhere else looking like they belong to where you are. Stations
+the train reaches but no ride could cover are counted, using the straight-line
+bound: a ride is never shorter than the crow flight, so the count is honest even
+though nothing was routed.
+
+Going back to the plan's own home restores the full view exactly.
+
 ### Moving the budget without rebuilding
 
 The trip panel's **your day** control changes `budgetHours`, `minHours`,

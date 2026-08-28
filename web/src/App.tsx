@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Plan } from "../../src/build/buildPlan.js";
+import type { Plan, PlanDestination } from "../../src/build/buildPlan.js";
 import { MapView } from "./MapView.js";
 import { SURFACES, type LoadedProfile } from "./grade.js";
 import {
@@ -11,6 +11,11 @@ import {
 import { haversine } from "../../src/shared/geo.js";
 import { TripDetail } from "./TripDetail.js";
 import { SettingsPanel } from "./SettingsPanel.js";
+import { HomePicker } from "./HomePicker.js";
+import { Timetable } from "./timetableClient.js";
+import type { Station } from "./timetableService.js";
+import { explore, quickestTrains, sameHome, type Home } from "./explore.js";
+import { parseTime } from "../../src/gtfs/time.js";
 import { reckon } from "./budget.js";
 import type { Budget } from "../../src/bike/effort.js";
 import {
@@ -115,6 +120,15 @@ function readStoredBudget(): Partial<Budget> | null {
 const clamp = (value: number | undefined, ceiling: number) =>
   typeof value === "number" && Number.isFinite(value) ? Math.min(value, ceiling) : ceiling;
 
+/** Destinations found by querying the timetable here, rather than read from the file. */
+interface Live {
+  home: Home;
+  monthKey: string;
+  destinations: PlanDestination[];
+  outOfRange: number;
+  querying: boolean;
+}
+
 type Load =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -133,6 +147,13 @@ export function App() {
   const [profile, setProfile] = useState<LoadedProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useRemembered("vojeto.sidebar", true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [homeOpen, setHomeOpen] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [picked, setPicked] = useState<Home | null>(null);
+  const [stations, setStations] = useState<Station[] | null>(null);
+  const [timetableError, setTimetableError] = useState<string | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
+  const timetable = useRef<Timetable | null>(null);
   const [keyOpen, setKeyOpen] = useRemembered("vojeto.key", true);
   const selectedRow = useRef<HTMLLIElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -170,6 +191,33 @@ export function App() {
     [plan],
   );
   const [budget, setBudget] = useBudget(built);
+
+  const builtHome: Home = useMemo(
+    () => ({
+      stationId: plan?.home.station.stationId ?? "",
+      name: plan?.home.station.name ?? "",
+      at: { lat: plan?.home.station.lat ?? 0, lon: plan?.home.station.lon ?? 0 },
+      rideTo: plan?.home.rideTo ?? { lat: 0, lon: 0 },
+    }),
+    [plan],
+  );
+  const current = picked ?? builtHome;
+  const offPlan = plan !== null && !sameHome(current, builtHome);
+
+  // The timetable is 800 KB and only wanted by someone who is going to move the
+  // home, so it is fetched when the picker is first opened rather than on load.
+  useEffect(() => {
+    if (!homeOpen || timetable.current) return;
+    const client = new Timetable();
+    timetable.current = client;
+    client
+      .load()
+      .then((loaded) => setStations(loaded.stations))
+      .catch((error: unknown) =>
+        setTimetableError(error instanceof Error ? error.message : String(error)),
+      );
+  }, [homeOpen]);
+
 
   // Elevation is fetched per variant rather than shipped in plan.json: at ~10 KB
   // each, all of them together would be several megabytes for data you only look
@@ -222,20 +270,72 @@ export function App() {
     [plan, monthKey],
   );
 
+  // Re-query whenever the home or the month moves off the plan. The plan's own
+  // home needs no query: its answers are in the file, with rides attached.
+  useEffect(() => {
+    const client = timetable.current;
+    if (!plan || !month || !client || !offPlan) {
+      setLive(null);
+      return;
+    }
+    let cancelled = false;
+    setLive((previous) =>
+      previous && sameHome(previous.home, current) && previous.monthKey === month.key
+        ? { ...previous, querying: true }
+        : { home: current, monthKey: month.key, destinations: [], outOfRange: 0, querying: true },
+    );
+
+    client
+      .reachable({
+        date: Number(month.date.replaceAll("-", "")),
+        origin: current.stationId,
+        earliestDeparture: 5 * 3600,
+        arriveBy: parseTime(plan.settings.arriveBy),
+        arriveNoEarlierThan: 6 * 3600,
+        maxTravelSeconds: 4 * 3600,
+        maxTransfers: plan.settings.maxTransfers,
+        minTransferSeconds: plan.settings.minTransferMinutes * 60,
+        maxTransferSeconds: plan.settings.maxTransferMinutes * 60,
+      })
+      .then((itineraries) => {
+        if (cancelled) return;
+        const found = explore(itineraries, current.rideTo, budget, { curves });
+        setLive({ home: current, monthKey: month.key, ...found, querying: false });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setTimetableError(error instanceof Error ? error.message : String(error));
+        setLive(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // `current` and `curves` are rebuilt each render; the identity that matters
+    // is the home's own, which sameHome decides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, month?.key, offPlan, current.stationId, current.rideTo.lat, current.rideTo.lon, budget]);
+
   // Everything the budget decides is re-decided here rather than read out of
   // the file, so the sliders move the map without re-routing anything. At the
   // plan's own settings this reproduces the file exactly.
+  // Off the plan's own home there are no routed rides yet, so the list is the
+  // train half only. `reckon` needs rides to judge anything, so it is not asked.
   const reckoned = useMemo(
     () =>
-      plan && month
+      plan && month && !offPlan
         ? reckon(month.destinations, plan.rides, plan.trainHours ?? {}, budget)
         : null,
-    [plan, month, budget],
+    [plan, month, budget, offPlan],
   );
 
+  const shownDestinations = offPlan
+    ? (live?.destinations ?? [])
+    : (reckoned?.destinations ?? []);
+
   const corridors = useMemo(
-    () => (reckoned ? groupIntoCorridors(reckoned.destinations, reckoned.rides) : []),
-    [reckoned],
+    () => groupIntoCorridors(shownDestinations, reckoned?.rides ?? {}),
+    [shownDestinations, reckoned],
   );
 
   // Selection usually comes from clicking the map, so bring the matching row
@@ -323,16 +423,26 @@ export function App() {
             ⟨
           </button>
           <h1>Train out, bike back</h1>
-          <button
-            type="button"
-            className="settings-open"
-            onClick={() => setSettingsOpen((open) => !open)}
-            aria-expanded={settingsOpen}
-          >
-            {narrowed ? "your day ·  adjusted" : "your day"}
-          </button>
+          <span className="masthead-controls">
+            <button
+              type="button"
+              className="settings-open"
+              onClick={() => setHomeOpen((open) => !open)}
+              aria-expanded={homeOpen}
+            >
+              {offPlan ? "start · moved" : "start"}
+            </button>
+            <button
+              type="button"
+              className="settings-open"
+              onClick={() => setSettingsOpen((open) => !open)}
+              aria-expanded={settingsOpen}
+            >
+              {narrowed ? "your day · adjusted" : "your day"}
+            </button>
+          </span>
           <p>
-            From <strong>{home.station.name}</strong>, off the train by{" "}
+            From <strong>{current.name}</strong>, off the train by{" "}
             <strong>{settings.arriveBy}</strong>, home within{" "}
             <strong>{formatHours(budget.budgetHours)}</strong>
             {budget.maxDays > 1 && ` over up to ${budget.maxDays} days`}.
@@ -351,6 +461,41 @@ export function App() {
             </button>
           ))}
         </nav>
+
+        {homeOpen && (
+          <HomePicker
+            stations={stations}
+            loading={stations === null && timetableError === null}
+            error={timetableError}
+            home={current}
+            built={builtHome}
+            placing={placing}
+            onPick={(next) => {
+              setPicked(next);
+              setSelected(null);
+              setPlacing(false);
+            }}
+            onPlace={setPlacing}
+            onClose={() => {
+              setHomeOpen(false);
+              setPlacing(false);
+            }}
+          />
+        )}
+
+        {offPlan && (
+          <p className="off-plan">
+            {live?.querying
+              ? "Asking the timetable…"
+              : `${shownDestinations.length} stations reachable by train${
+                  live && live.outOfRange > 0
+                    ? `, ${live.outOfRange} more too far to ride back from`
+                    : ""
+                }.`}{" "}
+            No ride home has been routed from here yet — the distances and
+            gradients below belong to <strong>{builtHome.name}</strong>.
+          </p>
+        )}
 
         {settingsOpen && (
           <SettingsPanel
@@ -486,6 +631,12 @@ export function App() {
         )}
         <MapView
           plan={load.plan}
+          home={current}
+          placing={placing}
+          onPlace={(at) => {
+            setPicked({ ...current, rideTo: at });
+            setPlacing(false);
+          }}
           destinations={corridors.flatMap((c) => c.destinations)}
           selected={selected}
           variant={activeVariant}
