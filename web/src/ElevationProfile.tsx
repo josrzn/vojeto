@@ -309,13 +309,6 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
         )}
       </figcaption>
 
-      <EffortMix
-        bands={bands}
-        domain={domain}
-        totalLabel={showTime ? formatHours(geometry.total) : `${totalKm.toFixed(0)} km`}
-        measure={showTime ? "time" : "distance"}
-      />
-
       <ul className="grade-key">
         {GRADE_LABELS.map((label, band) => (
           <li key={label}>
@@ -327,6 +320,15 @@ export function ElevationProfile({ profile, effort, totalHours, onHover }: Props
           </li>
         ))}
       </ul>
+
+      <EffortMix
+        bands={bands}
+        surface={profile.surface}
+        domain={domain}
+        totalLabel={showTime ? formatHours(geometry.total) : `${totalKm.toFixed(0)} km`}
+        measure={showTime ? "time" : "distance"}
+      />
+
     </figure>
   );
 }

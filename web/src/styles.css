@@ -533,7 +533,7 @@ code {
 
 /* Effort mix ------------------------------------------------------------- */
 
-.mix { margin: 0.5rem 0 0; }
+.mix { margin: 0.45rem 0 0; }
 
 /* A 2px page-coloured gap between segments, so two neighbouring steps of the
    ramp never share an edge — the pale end of the arm is close enough that a
@@ -565,14 +565,31 @@ code {
 .on-dark .mix-figure { color: #ffffff; opacity: 0.9; }
 
 .mix-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin: 0.2rem 0 0;
   font-size: 0.68rem;
   color: #93a1b0;
+}
+.mix-pick { display: flex; gap: 0.2rem; flex: none; }
+
+/* Hatched rather than merely pale: unrecorded surface is the absence of a
+   reading, not a third kind of ground, and a flat fill beside two solid ones
+   would present it as though it were a measurement. */
+.is-hatched {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.9) 0 3px,
+    rgba(0, 0, 0, 0.07) 3px 6px
+  );
 }
 
 .grade-key {
   list-style: none;
   display: grid;
+  order: 0;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.15rem 0.4rem;
   margin: 0.4rem 0 0;

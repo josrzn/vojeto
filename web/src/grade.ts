@@ -50,6 +50,30 @@ export const MAP_GRADE_COLORS = GRADE_COLORS.map((color, band) =>
   band === 0 ? GRADE_COLORS[1] : color,
 );
 
+/**
+ * The surfaces, as their own small palette rather than more of the gradient ramp.
+ *
+ * Grey for made-up road, earth brown for what is not, and a pale hatch for what
+ * nobody has recorded. They never share a bar with the gradient bands — the mix
+ * bar shows one division or the other — so these only had to separate from each
+ * other, which they do by 17, 32 and 17 under normal vision and by at least 16
+ * under simulated protanopia and deuteranopia.
+ *
+ * Ink is legible on all three, so unlike the gradient ramp no segment needs
+ * light text.
+ */
+export const SURFACE_COLORS: Record<Surface, string> = {
+  paved: "#a4acb4",
+  unpaved: "#b17834",
+  unknown: "#dfe3e7",
+};
+
+export const SURFACE_LABELS: Record<Surface, string> = {
+  paved: "road",
+  unpaved: "unpaved",
+  unknown: "unrecorded",
+};
+
 /** Bands dark enough that a label sitting on one has to be light. */
 export const DARK_BANDS = new Set([4, 5]);
 

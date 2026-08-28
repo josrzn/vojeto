@@ -485,8 +485,16 @@ six ways home. Reading that off the profile means integrating a wiggly line by
 eye, and a fifth of a ride at 6–9% does not look like a fifth of anything when it
 is spread over four separate ramps.
 
-It follows the axis switch, and that is the interesting part. The same ride, by
-distance and then by time:
+The bar divides the ride by **gradient** or by **surface** — one or the other,
+never both. Eight or nine segments and two keys would not fit a panel this
+tight, and nobody reads a ride as "steep *and* gravel" in a single glance
+anyway: you ask one question, then the other. The surface view is the quieter
+of the two, since three segments are wide enough to name themselves and it needs
+no key at all. Unrecorded surface is hatched rather than merely pale, because it
+is the absence of a reading rather than a third kind of ground.
+
+Either way it follows the axis switch, and that is the interesting part. The
+same ride divided by gradient, by distance and then by time:
 
 ```
 distance   40% downhill · 35% flat · 24% at 3–6%
