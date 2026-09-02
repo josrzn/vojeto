@@ -7,6 +7,7 @@
   "scripts": {
     "ingest": "tsx src/cli.ts ingest",
     "plan": "tsx src/cli.ts plan",
+    "forget": "tsx src/cli.ts forget",
     "stations": "tsx src/cli.ts stations",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

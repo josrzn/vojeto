@@ -47,6 +47,27 @@ it and nothing breaks.
 `npm run dev` serves `public/` live; a built site only picks up new data when it
 is rebuilt, so `npm run preview` rebuilds first.
 
+### Telling the cache it is wrong
+
+A plan is a cache, and every cache needs a way to be told to forget:
+
+```sh
+npm run forget                    # list what is cached
+npm run forget -- Villefranche    # by name, loosely, or by station id
+npm run forget -- --all           # the lot
+```
+
+Only the rides go. The ride-time field, the stations with no morning train and
+the settings the plan was built with all describe the place rather than one road
+home, and throwing them away to re-ask for a single route would be a poor trade.
+The .gpx and elevation profile files those rides pointed at are deleted with
+them, after checking nothing else still reads them.
+
+A forgotten station is routed on demand the next time you click it, live from
+BRouter. Note that `npm run plan` would refill it from `data/brouter-cache/`
+instead — the same roads it gave you last time — so delete that too if what you
+want is for the router to think again.
+
 ## Configuration
 
 Everything personal lives in [`config/home.json`](config/home.json).
@@ -787,6 +808,7 @@ every calendar, every derived lookup — and answers a RAPTOR query identically.
 ```sh
 npm run ingest                 # download, validate, pack for the browser
 npm run plan                   # optional: pre-route every ride home
+npm run forget -- Villefranche # drop cached rides, so they are routed again
 npm run stations -- Lyon       # what calls at a station, unfiltered
 npm test                       # unit tests
 npm run build                  # typecheck + build the static site into dist/
@@ -802,6 +824,7 @@ Useful flags (after `--`):
 | `--field` | Also sample ride time home on a grid, for the contour backdrop. |
 | `--limit <n>` | Only route the `n` nearest destinations home. |
 | `--brouter <url>` | Route against a different BRouter instance. |
+| `--all` | Forget every cached ride (`forget` only). |
 | `--max-age-hours <n>` | Re-download the feed if the cached copy is older than this. |
 
 ## How it works

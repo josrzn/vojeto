@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { gzip } from "node:zlib";
 import { loadConfig } from "./config.js";
 import { downloadFeed, listMembers } from "./gtfs/archive.js";
@@ -7,8 +7,14 @@ import { loadTimetable } from "./gtfs/load.js";
 import { packTimetable } from "./gtfs/pack.js";
 import type { TimetableIndex } from "./shared/types.js";
 import { formatDate } from "./gtfs/time.js";
-import { buildPlan, writePlan } from "./build/buildPlan.js";
+import { buildPlan, writePlan, type Plan } from "./build/buildPlan.js";
 import { resolveHome, searchStations } from "./build/stations.js";
+import {
+  cachedStations,
+  forgetRides,
+  matchStations,
+  orphanedFiles,
+} from "./build/forget.js";
 import { sampleDates } from "./build/dates.js";
 import { keepKind, stopKind, type KindFilter } from "./gtfs/serviceKind.js";
 import { sampleRideField, sampleCount } from "./bike/field.js";
@@ -33,6 +39,7 @@ interface Flags {
   feed: string | undefined;
   brouter: string | undefined;
   maxAgeHours: number;
+  all: boolean;
 }
 
 function parseArgs(argv: string[]): Flags {
@@ -46,6 +53,7 @@ function parseArgs(argv: string[]): Flags {
     feed: undefined,
     brouter: undefined,
     maxAgeHours: 24,
+    all: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -56,6 +64,7 @@ function parseArgs(argv: string[]): Flags {
     else if (arg === "--feed") flags.feed = argv[++i];
     else if (arg === "--brouter") flags.brouter = argv[++i];
     else if (arg === "--max-age-hours") flags.maxAgeHours = Number(argv[++i]);
+    else if (arg === "--all") flags.all = true;
     else if (!flags.command) flags.command = arg;
     else flags.rest.push(arg);
   }
@@ -193,6 +202,67 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "forget": {
+      const raw = await readFile(PLAN_FILE, "utf8").catch(() => null);
+      if (raw === null) {
+        console.log(`There is no ${PLAN_FILE}, so nothing is cached. Nothing to forget.`);
+        break;
+      }
+      const plan = JSON.parse(raw) as Plan;
+      const cached = cachedStations(plan);
+      if (cached.length === 0) {
+        console.log(`${PLAN_FILE} holds no rides. Nothing to forget.`);
+        break;
+      }
+
+      if (!flags.all && flags.rest.length === 0) {
+        console.log(
+          `Usage: npm run forget -- <station> [station…]   or   npm run forget -- --all\n\n` +
+            `${cached.length} stations have rides in ${PLAN_FILE}:`,
+        );
+        for (const station of cached) {
+          console.log(`  ${station.name}\t${station.variants} ways home\t${station.stationId}`);
+        }
+        break;
+      }
+
+      const { matched, unmatched } = flags.all
+        ? { matched: cached, unmatched: [] }
+        : matchStations(cached, flags.rest);
+      for (const query of unmatched) {
+        console.warn(`Nothing cached matches ${JSON.stringify(query)}.`);
+      }
+      if (matched.length === 0) {
+        console.log("Nothing forgotten. `npm run forget` on its own lists what is cached.");
+        break;
+      }
+
+      const forgotten = new Set(matched.map((station) => station.stationId));
+      const orphans = orphanedFiles(plan, forgotten);
+      for (const station of matched) {
+        console.log(`  forgot ${station.name} (${station.variants} ways home)`);
+      }
+
+      for (const file of orphans.gpx) await rm(path.join(GPX_DIR, file), { force: true });
+      for (const file of orphans.profiles) {
+        await rm(path.join(PROFILE_DIR, file), { force: true });
+      }
+      await writePlan(forgetRides(plan, forgotten), PLAN_FILE);
+
+      const remaining = cached.length - matched.length;
+      console.log(
+        `${matched.length} station${matched.length === 1 ? "" : "s"} forgotten, ` +
+          `${orphans.gpx.length + orphans.profiles.length} files removed, ` +
+          `${remaining} still cached.`,
+      );
+      console.log(
+        "The app will ask BRouter for those rides again the next time you click them.\n" +
+          "`npm run plan` would refill them from data/brouter-cache, i.e. with the same roads;\n" +
+          "delete that cache too if you want the router to think again.",
+      );
+      break;
+    }
+
     case "plan": {
       const feed = await feedPath(flags, config.gtfs.url);
       const index = await loadTimetable({
@@ -265,11 +335,13 @@ async function main(): Promise<void> {
           "",
           "  ingest      download the feed and check it against your config",
           "  plan        build public/data/plan.json for the web app",
+          "  forget      drop cached rides from the plan, so they are routed again",
           "  stations    what calls at a station, with no service filter applied",
           "",
           "Flags:",
           "  --feed <path>        use a local .zip or extracted directory instead of downloading",
         "  --brouter <url>      route against another BRouter, e.g. a local instance",
+          "  --all                forget every cached ride (forget only)",
           "  --explain-routes     list every route label and whether the filter kept it",
           "  --skip-bike          train results only, no BRouter calls",
         "  --field              also sample ride time home on a grid, for the map backdrop",
