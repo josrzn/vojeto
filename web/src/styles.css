@@ -574,6 +574,9 @@ code {
 .home-error { margin: 0.4rem 0 0; font-size: 0.72rem; color: var(--bike); }
 /* Said where the thing that failed is: the route you just asked for. */
 .detail-error { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--bike); }
+/* Where a ride came from: quiet, but present, because a cache that cannot be
+   seen looks exactly like an app that never asks. */
+.detail-provenance { margin: 0.35rem 0 0; font-size: 0.7rem; color: #93a1b0; }
 
 /* Settings ---------------------------------------------------------------- */
 

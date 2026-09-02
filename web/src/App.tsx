@@ -111,6 +111,16 @@ export function App() {
   const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [querying, setQuerying] = useState(false);
   const [rides, setRides] = useState<Rides>({});
+  /**
+   * Which ways home came out of the plan rather than off the wire.
+   *
+   * Keyed "station|variant". Worth tracking only to be able to say it: a
+   * stationful of routes that appears the instant you click, with no waiting
+   * and no request, is exactly what the app looked like before it routed
+   * anything on demand — and twice now that has read as a stale build rather
+   * than as a cache working.
+   */
+  const [fromPlan, setFromPlan] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, LoadedProfile>>({});
   const [routing, setRouting] = useState<Routing | null>(null);
   const [rideError, setRideError] = useState<string | null>(null);
@@ -209,7 +219,15 @@ export function App() {
   useEffect(() => {
     routeRun.current?.abort();
     tracks.current.clear();
-    setRides(warmCache(plan, home));
+    const cached = warmCache(plan, home);
+    setRides(cached);
+    setFromPlan(
+      new Set(
+        Object.entries(cached).flatMap(([stationId, variants]) =>
+          variants.map((variant) => `${stationId}|${variant.id}`),
+        ),
+      ),
+    );
     setProfiles({});
     setRouting(null);
     setRideError(null);
@@ -646,7 +664,10 @@ export function App() {
         <footer className="colophon">
           Feed {formatDate(loaded.feedStart)} → {formatDate(loaded.plannableEnd)}. Riding at{" "}
           {describeCurve(curves.paved)}.
-          {plan ? " Routes already in the plan are shown without asking BRouter again." : ""}
+          {plan
+            ? ` Plan built ${describeAge(plan.generatedAt)}: its routes are shown` +
+              " without asking BRouter again."
+            : ""}
         </footer>
       </aside>
 
@@ -776,6 +797,8 @@ export function App() {
             routing={routing?.stationId === chosen.stationId ? routing.styleId : null}
             error={rideError}
             remaining={remaining}
+            cached={variants.filter((v) => fromPlan.has(`${chosen.stationId}|${v.id}`)).length}
+            planAge={plan ? describeAge(plan.generatedAt) : null}
             tooShort={judged?.tooShort ?? false}
             minHours={settings.minHours}
             onRouteMore={routeMore}
@@ -787,6 +810,23 @@ export function App() {
       </main>
     </div>
   );
+}
+
+/**
+ * How long ago the plan was generated.
+ *
+ * Shown because a plan is a cache, and the one thing you cannot see by looking
+ * at a cached answer is how old it is.
+ */
+function describeAge(generatedAt: string): string {
+  const minutes = Math.round((Date.now() - new Date(generatedAt).getTime()) / 60000);
+  if (!Number.isFinite(minutes)) return "at an unknown time";
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
 function message(error: unknown): string {

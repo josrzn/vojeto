@@ -22,6 +22,10 @@ interface Props {
   error: string | null;
   /** Ways home not fetched yet, each one request away. */
   remaining: RouteStyle[];
+  /** How many of the ways home shown came out of the plan rather than off the wire. */
+  cached: number;
+  /** How old that plan is, or null when there is none. */
+  planAge: string | null;
   /** True when even the most direct way back is too short to be worth the fare. */
   tooShort: boolean;
   minHours: number;
@@ -63,6 +67,8 @@ export function TripDetail({
   routing,
   error,
   remaining,
+  cached,
+  planAge,
   tooShort,
   minHours,
   onRouteMore,
@@ -153,6 +159,19 @@ export function TripDetail({
               </button>
             ))}
           </div>
+
+          {/* Said because a cache is invisible: several routes arriving at once,
+              with no wait, is what the app looked like when it precomputed
+              everything, and there is otherwise nothing on screen to tell the
+              two apart. */}
+          {cached > 0 && (
+            <p className="detail-provenance">
+              {cached === variants.length
+                ? `${cached === 1 ? "This way" : `All ${cached} ways`} home came from the plan`
+                : `${cached} of these came from the plan`}
+              {planAge ? ` built ${planAge}` : ""} — no request was made.
+            </p>
+          )}
 
           {tooShort && (
             <p className="detail-note">
