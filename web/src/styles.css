@@ -45,7 +45,13 @@ code {
 }
 /* One column, not `0 1fr`: the hidden panel leaves the grid entirely, so the
    stage would auto-place into the zero-width first column and vanish. */
-.layout.is-collapsed { grid-template-columns: 1fr; }
+.layout.is-collapsed {
+  grid-template-columns: 1fr;
+  /* With the list hidden, the button that brings it back stands in the top-left
+     corner of the map — which is where the trip panel starts. The panel moves
+     down to clear it, rather than the station's name being read through it. */
+  --detail-top: 3.6rem;
+}
 
 .panel-toggle {
   position: absolute;
@@ -424,10 +430,10 @@ code {
 
 .detail {
   position: absolute;
-  top: 1rem;
+  top: var(--detail-top, 1rem);
   left: 1rem;
   width: min(360px, calc(100% - 2rem));
-  max-height: calc(100% - 2rem);
+  max-height: calc(100% - var(--detail-top, 1rem) - 1rem);
   overflow-y: auto;
   background: var(--paper);
   border: 1px solid var(--line);
